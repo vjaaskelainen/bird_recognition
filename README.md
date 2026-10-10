@@ -19,11 +19,12 @@ tools through `uv run` so they use the locked development dependencies.
 
 ## AI-assisted development
 
-This repository uses the `nlsfi/agent-instructions-template` for coding-agent
-guidance. Its skills are in [`.agents/skills/`](.agents/skills/): `nls-python`
-covers Python conventions and testing, while `nls-ai-housekeeping` describes
-the process for maintaining agent instructions and repository documentation.
-The template source and configuration are recorded in
+Repository-wide coding-agent guidance is in [`AGENTS.md`](AGENTS.md). This
+repository uses the `nlsfi/agent-instructions-template`; its skills are in
+[`.agents/skills/`](.agents/skills/): `nls-python` covers Python conventions
+and testing, while `nls-ai-housekeeping` describes maintaining agent
+instructions and repository documentation. The template source and
+configuration are recorded in
 [`.copier-answers.agent-instructions.yml`](.copier-answers.agent-instructions.yml).
 
 ## Development checks
