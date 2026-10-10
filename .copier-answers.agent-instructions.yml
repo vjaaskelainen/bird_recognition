@@ -1,0 +1,10 @@
+# _commit: 4a3c16a
+_src_path: https://github.com/nlsfi/agent-instructions-template.git
+has_airflow: false
+has_ansible: false
+has_java: false
+has_jenkins: false
+has_python: true
+has_qgis: false
+has_sql: false
+use_external_skills: false

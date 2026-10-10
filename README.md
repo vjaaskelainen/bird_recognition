@@ -17,6 +17,15 @@ uv run pre-commit install
 `uv sync` creates or updates the project environment from `uv.lock`. Run project
 tools through `uv run` so they use the locked development dependencies.
 
+## AI-assisted development
+
+This repository uses the `nlsfi/agent-instructions-template` for coding-agent
+guidance. Its skills are in [`.agents/skills/`](.agents/skills/): `nls-python`
+covers Python conventions and testing, while `nls-ai-housekeeping` describes
+the process for maintaining agent instructions and repository documentation.
+The template source and configuration are recorded in
+[`.copier-answers.agent-instructions.yml`](.copier-answers.agent-instructions.yml).
+
 ## Development checks
 
 ```powershell
