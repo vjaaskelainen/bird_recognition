@@ -17,6 +17,19 @@ uv run pre-commit install
 `uv sync` creates or updates the project environment from `uv.lock`. Run project
 tools through `uv run` so they use the locked development dependencies.
 
+## Local database
+
+Start the local Postgres + pgvector service with Podman Compose:
+
+```powershell
+podman compose up -d
+```
+
+The default connection is `postgresql://bird_recognition:bird_recognition@localhost:5432/bird_recognition`.
+Set `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD`, or `POSTGRES_PORT` in
+`.env` to override the defaults. Enable the vector extension in the database
+before using it with `CREATE EXTENSION IF NOT EXISTS vector;`.
+
 ## AI-assisted development
 
 Repository-wide coding-agent guidance is in [`AGENTS.md`](AGENTS.md). The
