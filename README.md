@@ -62,3 +62,7 @@ uv run pre-commit run --all-files
 
 The installed pre-commit hook runs Ruff lint fixes and formatting on staged
 Python files before each commit. Review and stage any changes it makes.
+
+GitHub Actions runs Ruff linting, formatting checks, and pytest on every push
+and pull request. The CI test step installs pytest transiently; local development
+dependencies remain defined by `uv.lock`.
