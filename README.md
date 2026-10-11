@@ -19,12 +19,13 @@ tools through `uv run` so they use the locked development dependencies.
 
 ## AI-assisted development
 
-Repository-wide coding-agent guidance is in [`AGENTS.md`](AGENTS.md). This
-repository uses the `nlsfi/agent-instructions-template`; its skills are in
-[`.agents/skills/`](.agents/skills/): `nls-python` covers Python conventions
-and testing, while `nls-ai-housekeeping` describes maintaining agent
-instructions and repository documentation. The template source and
-configuration are recorded in
+Repository-wide coding-agent guidance is in [`AGENTS.md`](AGENTS.md). The
+repository uses the `nlsfi/agent-instructions-template` and spec-kit with the
+Copilot integration. Skills for Python conventions, instruction maintenance,
+and the spec-kit feature workflow are in [`.agents/skills/`](.agents/skills/).
+For feature work, the workflow is specify → plan → tasks → implement → converge;
+review each artifact before moving to the next step. The agent-instructions
+template source and configuration are recorded in
 [`.copier-answers.agent-instructions.yml`](.copier-answers.agent-instructions.yml).
 
 ## Development checks

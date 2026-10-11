@@ -10,6 +10,7 @@
 
 - When a change makes documentation updates appropriate, update the relevant documentation and this file. Keep both brief and avoid duplicating information.
 - Do not copy skill contents into this file. Link to [nls-python](.agents/skills/nls-python/SKILL.md) for Python conventions and [nls-ai-housekeeping](.agents/skills/nls-ai-housekeeping/SKILL.md) for instruction and documentation maintenance when relevant.
+- For spec-driven feature work, use the installed spec-kit skills in `.agents/skills/`: `speckit-specify` → `speckit-plan` → `speckit-tasks` → `speckit-implement` → `speckit-converge`. Use `speckit-clarify` or `speckit-analyze` when useful; establish the project constitution once.
 - Refer to [`pyproject.toml`](pyproject.toml) and [`.pre-commit-config.yaml`](.pre-commit-config.yaml) for tooling settings; do not duplicate linter or formatter configuration here.
 - Run the configured linters as the last step before reporting completion. If fixes are needed, make them and rerun the checks.
 
