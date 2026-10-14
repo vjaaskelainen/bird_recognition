@@ -11,8 +11,8 @@
 **Purpose**: Add only the runtime/test dependencies and package/test structure needed by the planned CLI workflow.
 
 - [ ] T001 Verify the official MegaDetector inference API/model format and PyTorch, PyAV, Pillow, and pytest compatibility on Python 3.14; declare the tested runtime/development dependency constraints in `pyproject.toml`. Do not edit `uv.lock`; request owner-run `uv sync` per `AGENTS.md`.
-- [ ] T002 Create the planned ingestion package and test package structure with `src/bird_recognition/ingest/__init__.py` and `tests/ingest/__init__.py`.
-- [ ] T003 [P] Add reusable tiny synthetic video/frame fixtures and deterministic fake-detector helpers in `tests/ingest/conftest.py`; fixtures must not contain private footage or require model weights/network access.
+- [X] T002 Create the planned ingestion package and test package structure with `src/bird_recognition/ingest/__init__.py` and `tests/ingest/__init__.py`.
+- [X] T003 [P] Add reusable tiny synthetic video/frame fixtures and deterministic fake-detector helpers in `tests/ingest/conftest.py`; fixtures must not contain private footage or require model weights/network access.
 
 ---
 
@@ -20,8 +20,8 @@
 
 **Purpose**: Establish shared validated settings, record types, and privacy-safe output path handling before user-story implementation.
 
-- [ ] T004 Implement shared typed records, enums, settings, and domain errors in `src/bird_recognition/ingest/models.py`; validate that sampling interval is positive and finite, thresholds are finite in `[0,1]`, confidence is finite in `[0,1]`, dimensions are positive, and frame numbers are non-negative.
-- [ ] T005 Implement input/output canonicalization and destination safety checks in `src/bird_recognition/cli.py`; reject output that overlaps the input tree or resolves to Git-tracked content, without relying on basenames for identity.
+- [X] T004 Implement shared typed records, enums, settings, and domain errors in `src/bird_recognition/ingest/models.py`; validate that sampling interval is positive and finite, thresholds are finite in `[0,1]`, confidence is finite in `[0,1]`, dimensions are positive, and frame numbers are non-negative.
+- [X] T005 Implement input/output canonicalization and destination safety checks in `src/bird_recognition/cli.py`; reject output that overlaps the input tree or resolves to Git-tracked content, without relying on basenames for identity.
 
 **Checkpoint**: Settings and privacy/path invariants are reusable by all user stories.
 
@@ -42,11 +42,11 @@
 
 ### Implementation for User Story 1
 
-- [ ] T010 [P] \[US1\] Implement single-pass PyAV frame decoding and elapsed-time target sampling with PTS-derived seconds, zero-based decoded frame numbers, VFR handling, short-video first-frame behavior, and safe handling of corrupt or missing sampled-frame timing in `src/bird_recognition/ingest/video.py`.
+- [X] T010 [P] \[US1\] Implement single-pass PyAV frame decoding and elapsed-time target sampling with PTS-derived seconds, zero-based decoded frame numbers, VFR handling, short-video first-frame behavior, and safe handling of corrupt or missing sampled-frame timing in `src/bird_recognition/ingest/video.py`.
 - [ ] T011 [P] \[US1\] Implement a detector protocol and local pretrained MegaDetector adapter in `src/bird_recognition/ingest/detection.py`; initialize once per run, normalize outputs to `animal`/`person`/`other`, record model identity/version and SHA-256, and fail closed on load or inference errors without downloading weights.
-- [ ] T012 [P] \[US1\] Implement box validation/clipping and deterministic local crop encoding in `src/bird_recognition/ingest/crops.py`; store each box as clipped original-frame pixel coordinates `(left, top, right, bottom)` with right/bottom exclusive, reject malformed or zero-area regions, and stage/publish one frame's crops as a complete set or publish none.
-- [ ] T013 \[US1\] Implement the sampled-frame filtering pipeline in `src/bird_recognition/ingest/pipeline.py`; evaluate each complete frame once, apply inclusive separate thresholds, give qualifying people precedence, discard no-animal/vehicle-only frames, publish no image for person-excluded or failed-detection frames, and report a crop/storage failure without exposing a partial frame result.
-- [ ] T014 \[US1\] Implement the `ingest` argparse command, default interval/threshold values, preflight validation, model configuration, readable help, and the `bird-recognition` console entry point in `src/bird_recognition/cli.py` and `pyproject.toml`.
+- [X] T012 [P] \[US1\] Implement box validation/clipping and deterministic local crop encoding in `src/bird_recognition/ingest/crops.py`; store each box as clipped original-frame pixel coordinates `(left, top, right, bottom)` with right/bottom exclusive, reject malformed or zero-area regions, and stage/publish one frame's crops as a complete set or publish none.
+- [X] T013 \[US1\] Implement the sampled-frame filtering pipeline in `src/bird_recognition/ingest/pipeline.py`; evaluate each complete frame once, apply inclusive separate thresholds, give qualifying people precedence, discard no-animal/vehicle-only frames, publish no image for person-excluded or failed-detection frames, and report a crop/storage failure without exposing a partial frame result.
+- [X] T014 \[US1\] Implement the `ingest` argparse command, default interval/threshold values, preflight validation, model configuration, readable help, and the `bird-recognition` console entry point in `src/bird_recognition/cli.py` and `pyproject.toml`.
 - [ ] T015 \[US1\] Integrate fixture decoding, controlled detection, and crop assertions in `tests/ingest/test_cli.py`; verify a frame with multiple safe animal detections yields separate crops and a mixed person/animal frame yields none.
 
 **Checkpoint**: User Story 1 produces local privacy-filtered crops and can be tested without a model service or database service.
@@ -68,11 +68,11 @@
 
 ### Implementation for User Story 2
 
-- [ ] T020 \[US2\] Implement the SQLite schema and repository operations for `IngestionRun`, `SourceVideo`, `RunSource`, `SampledFrame`, `Detection`, and `AnimalCrop` in `src/bird_recognition/ingest/manifest.py`; enforce run status `running`/`complete`/`no_input`/`partial_failure`/`failed`, source status `processed`/`already_processed`/`failed`, non-negative run-source counts whose frame outcomes reconcile to sampled count, zero-based non-negative frame numbers and elapsed seconds, positive frame dimensions, frame outcome exactly `person_excluded`/`no_animal`/`retained`/`failed` with failure reason required for `failed`, detection category `animal`/`person`/`other`, finite confidence in `[0,1]` and inclusive threshold qualification, normalized validated boxes, and crop paths confined to output root with non-empty clipped exclusive-right/bottom pixel boxes matching positive original frame dimensions and saved image region. Preserve null capture time/timezone as explicit unknown and link crops to source/frame/detection/run/settings.
-- [ ] T021 \[US2\] Implement a deterministic versioned image-evidence day/night classifier in `src/bird_recognition/ingest/lighting.py`; classify uncertain/conflicting evidence as `unknown` and expose the classifier rule/version/thresholds for run settings.
-- [ ] T022 \[US2\] Extend video metadata extraction in `src/bird_recognition/ingest/video.py` to parse only recognized reliable capture-start metadata, preserve explicit timezone offsets, represent timezone ambiguity as unknown, and never use filename, file modification, or ingestion time.
-- [ ] T023 \[US2\] Extend crop/run orchestration in `src/bird_recognition/ingest/pipeline.py` to persist all required data-model fields, link each crop to its source/frame/detection/run/settings, share lighting and frame dimensions, and compute stable source/settings/crop identities; preserve operational run time as distinct from capture time and retain explicit unknown capture time/timezone instead of filesystem or ingestion-time fallbacks.
-- [ ] T024 \[US2\] Implement frame-level staged image publication and SQLite transaction coordination in `src/bird_recognition/ingest/crops.py` and `src/bird_recognition/ingest/manifest.py`; commit all frame crops/records together only after every image and metadata record is complete, otherwise expose none as successful.
+- [X] T020 \[US2\] Implement the SQLite schema and repository operations for `IngestionRun`, `SourceVideo`, `RunSource`, `SampledFrame`, `Detection`, and `AnimalCrop` in `src/bird_recognition/ingest/manifest.py`; enforce run status `running`/`complete`/`no_input`/`partial_failure`/`failed`, source status `processed`/`already_processed`/`failed`, non-negative run-source counts whose frame outcomes reconcile to sampled count, zero-based non-negative frame numbers and elapsed seconds, positive frame dimensions, frame outcome exactly `person_excluded`/`no_animal`/`retained`/`failed` with failure reason required for `failed`, detection category `animal`/`person`/`other`, finite confidence in `[0,1]` and inclusive threshold qualification, normalized validated boxes, and crop paths confined to output root with non-empty clipped exclusive-right/bottom pixel boxes matching positive original frame dimensions and saved image region. Preserve null capture time/timezone as explicit unknown and link crops to source/frame/detection/run/settings.
+- [X] T021 \[US2\] Implement a deterministic versioned image-evidence day/night classifier in `src/bird_recognition/ingest/lighting.py`; classify uncertain/conflicting evidence as `unknown` and expose the classifier rule/version/thresholds for run settings.
+- [X] T022 \[US2\] Extend video metadata extraction in `src/bird_recognition/ingest/video.py` to parse only recognized reliable capture-start metadata, preserve explicit timezone offsets, represent timezone ambiguity as unknown, and never use filename, file modification, or ingestion time.
+- [X] T023 \[US2\] Extend crop/run orchestration in `src/bird_recognition/ingest/pipeline.py` to persist all required data-model fields, link each crop to its source/frame/detection/run/settings, share lighting and frame dimensions, and compute stable source/settings/crop identities; preserve operational run time as distinct from capture time and retain explicit unknown capture time/timezone instead of filesystem or ingestion-time fallbacks.
+- [X] T024 \[US2\] Implement frame-level staged image publication and SQLite transaction coordination in `src/bird_recognition/ingest/crops.py` and `src/bird_recognition/ingest/manifest.py`; commit all frame crops/records together only after every image and metadata record is complete, otherwise expose none as successful.
 - [ ] T025 \[US2\] Add end-to-end provenance tests that reopen a completed run and verify timestamp derivation, explicit unknowns, lighting, detection confidence, image dimensions, and crop region equality in `tests/ingest/test_cli.py`.
 
 **Checkpoint**: Each retained crop is durable and independently traceable to its original source frame and effective run settings.
@@ -93,11 +93,11 @@
 
 ### Implementation for User Story 3
 
-- [ ] T029 \[US3\] Implement deterministic recursive discovery, case-insensitive supported extensions, canonical-path ordering, full source SHA-256, and path-plus-content source fingerprints in `src/bird_recognition/ingest/video.py`.
-- [ ] T030 \[US3\] Implement completed-source lookup by destination, source fingerprint, and effective settings fingerprint in `src/bird_recognition/ingest/manifest.py`; skip identical successful work, retain distinct results for changed work, and never overwrite prior output.
-- [ ] T031 \[US3\] Implement destination writer locking, stale staging cleanup, orphan crop-directory reconciliation, and rollback/cleanup of failed frame publication in `src/bird_recognition/ingest/manifest.py` and `src/bird_recognition/ingest/crops.py`.
-- [ ] T032 \[US3\] Implement batch/source/frame failure isolation and run summary accounting in `src/bird_recognition/ingest/pipeline.py`; report processed/skipped/failed videos, sampled frames, each mutually exclusive frame outcome, and crops as a separate count.
-- [ ] T033 \[US3\] Complete CLI preflight, no-input messaging, per-source actionable errors, summary rendering, and exit-code mapping in `src/bird_recognition/cli.py`; reject invalid values/unsafe paths before producing outputs.
+- [X] T029 \[US3\] Implement deterministic recursive discovery, case-insensitive supported extensions, canonical-path ordering, full source SHA-256, and path-plus-content source fingerprints in `src/bird_recognition/ingest/video.py`.
+- [X] T030 \[US3\] Implement completed-source lookup by destination, source fingerprint, and effective settings fingerprint in `src/bird_recognition/ingest/manifest.py`; skip identical successful work, retain distinct results for changed work, and never overwrite prior output.
+- [X] T031 \[US3\] Implement destination writer locking, stale staging cleanup, orphan crop-directory reconciliation, and rollback/cleanup of failed frame publication in `src/bird_recognition/ingest/manifest.py` and `src/bird_recognition/ingest/crops.py`.
+- [X] T032 \[US3\] Implement batch/source/frame failure isolation and run summary accounting in `src/bird_recognition/ingest/pipeline.py`; report processed/skipped/failed videos, sampled frames, each mutually exclusive frame outcome, and crops as a separate count.
+- [X] T033 \[US3\] Complete CLI preflight, no-input messaging, per-source actionable errors, summary rendering, and exit-code mapping in `src/bird_recognition/cli.py`; reject invalid values/unsafe paths before producing outputs.
 - [ ] T034 \[US3\] Complete fixture-driven batch and recovery integration tests in `tests/ingest/test_batch.py`; assert sampled-frame totals equal person-excluded + no-animal + retained + failed, with no crop files/records for person-excluded or failed frames.
 
 **Checkpoint**: A local owner can review a complete/partial batch and safely repeat or recover it without duplicate or incomplete results.
@@ -108,7 +108,7 @@
 
 **Purpose**: Document safe operation and verify the full feature without weakening privacy or offline testability.
 
-- [ ] T035 [P] Document installation/model provisioning, supported video formats, defaults, CLI examples, output safety, privacy limitations, and batch summary interpretation in `README.md` and `specs/001-ingest-videos/quickstart.md`.
+- [X] T035 [P] Document installation/model provisioning, supported video formats, defaults, CLI examples, output safety, privacy limitations, and batch summary interpretation in `README.md` and `specs/001-ingest-videos/quickstart.md`.
 - [ ] T036 Run the documented quickstart scenarios and the complete pytest, Ruff lint, and Ruff format checks from `README.md`; fix feature regressions in the corresponding `src/bird_recognition/ingest/`, `src/bird_recognition/cli.py`, and `tests/ingest/` files.
 
 ---

@@ -11,6 +11,7 @@
 - When a change makes documentation updates appropriate, update the relevant documentation and this file. Keep both brief and avoid duplicating information.
 - Do not copy skill contents into this file. Link to [nls-python](.agents/skills/nls-python/SKILL.md) for Python conventions and [nls-ai-housekeeping](.agents/skills/nls-ai-housekeeping/SKILL.md) for instruction and documentation maintenance when relevant.
 - For spec-driven feature work, use the installed spec-kit skills in `.agents/skills/`: `speckit-specify` → `speckit-plan` → `speckit-tasks` → `speckit-implement` → `speckit-converge`. Use `speckit-clarify` or `speckit-analyze` when useful; establish the project constitution once.
+- Keep ingestion footage and generated outputs outside the repository; follow the safe local workflow in [the ingestion quickstart](specs/001-ingest-videos/quickstart.md).
 - Refer to [`pyproject.toml`](pyproject.toml) and [`.pre-commit-config.yaml`](.pre-commit-config.yaml) for tooling settings; do not duplicate linter or formatter configuration here.
 - Pin GitHub Actions in workflows to full commit SHAs, with the upstream version in an adjacent comment.
 - Keep `.github/workflows/ci.yml` aligned with the documented lint, format, and test checks.

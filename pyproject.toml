@@ -7,12 +7,22 @@ name = "bird-recognition"
 version = "0.1.0"
 description = "Search and question-answering over trail-camera bird footage"
 requires-python = ">=3.14"
+dependencies = [
+    "av>=19.0.1,<20",
+    "megadetector==10.0.27",
+    "Pillow>=12.3.0,<13",
+    "torch>=2.14.1,<2.15",
+]
+
+[project.scripts]
+bird-recognition = "bird_recognition.cli:main"
 
 [dependency-groups]
 dev = [
     "pre-commit>=4.0",
     "ruff>=0.11",
     "copier>=9.10",
+    "pytest>=9.1.1,<10",
 ]
 
 [tool.hatch.build.targets.wheel]

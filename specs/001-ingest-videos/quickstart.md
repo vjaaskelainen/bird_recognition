@@ -11,6 +11,11 @@ This guide defines local end-to-end validation for [spec.md](spec.md). Ingestion
   uv sync
   ```
 
+- **Compatibility gate**: Do not use the real-video workflow until task T001 has
+  verified the official MegaDetector API/model format and Python 3.14-compatible
+  PyTorch, PyAV, Pillow, and pytest constraints. The repository lockfile must be
+  synchronized by the owner after those constraints are approved.
+
 - A local copy of the supported pretrained MegaDetector model and its configuration/runtime, provisioned separately. Set the documented model setting or pass `--model`; ingestion must not download it.
 - A temporary input directory containing local videos in documented supported formats. Tests use generated miniature fixtures and fake detections rather than private footage or a real model.
 

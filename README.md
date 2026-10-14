@@ -17,6 +17,36 @@ uv run pre-commit install
 `uv sync` creates or updates the project environment from `uv.lock`. Run project
 tools through `uv run` so they use the locked development dependencies.
 
+## Local video ingestion
+
+The `bird-recognition ingest` command scans local video directories recursively
+and writes animal crops with a SQLite provenance manifest. Provision the tested
+PyAV/Pillow dependencies and the official MegaDetector runtime/model locally;
+model weights are never downloaded by ingestion. Until the dependency update is
+approved and synchronized, see the feature [quickstart](specs/001-ingest-videos/quickstart.md)
+for the required owner-run setup.
+
+Keep the input footage and output directory outside the Git repository and make
+them disjoint. Supported extensions are `.mp4`, `.mov`, `.m4v`, `.mkv`, `.avi`,
+`.mpeg`, and `.mpg`. Sampling defaults to one second; animal and person confidence
+thresholds default to `0.2` and qualify inclusively. For example:
+
+```powershell
+uv run bird-recognition ingest `
+  --input "D:\trail-camera\videos" `
+  --output "D:\trail-camera\ingested" `
+  --model "D:\models\megadetector-model-file"
+```
+
+The output contains `manifest.sqlite3` and retained crops. The summary separates
+processed, skipped, and failed sources from mutually exclusive frame outcomes
+and crop count. Exit codes are `0` for complete/no-input, `1` for processing
+failures, and `2` for preflight errors. Capture time is unknown when reliable
+camera metadata is unavailable; filesystem timestamps are never substituted.
+Person detection is not a guarantee of anonymity: review crops manually before
+sharing them. See the [feature quickstart](specs/001-ingest-videos/quickstart.md)
+for fixture validation and batch recovery notes.
+
 ## Local database
 
 Start the local Postgres + pgvector service with Podman Compose:
