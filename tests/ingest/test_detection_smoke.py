@@ -2,14 +2,20 @@ import os
 from pathlib import Path
 
 import pytest
+from dotenv import dotenv_values, find_dotenv
 from PIL import Image
 
 from bird_recognition.ingest.detection import MegaDetectorAdapter
 from bird_recognition.ingest.models import Detection
 
-_SMOKE_MODEL = os.environ.get("BIRD_RECOGNITION_SMOKE_MODEL")
-_SMOKE_CONFIG = os.environ.get("BIRD_RECOGNITION_SMOKE_CONFIG")
-_SMOKE_IMAGE = os.environ.get("BIRD_RECOGNITION_SMOKE_IMAGE")
+_DOTENV_PATH = find_dotenv(usecwd=True)
+_ENVIRONMENT = {
+    **(dotenv_values(_DOTENV_PATH) if _DOTENV_PATH else {}),
+    **os.environ,
+}
+_SMOKE_MODEL = _ENVIRONMENT.get("BIRD_RECOGNITION_SMOKE_MODEL")
+_SMOKE_CONFIG = _ENVIRONMENT.get("BIRD_RECOGNITION_SMOKE_CONFIG")
+_SMOKE_IMAGE = _ENVIRONMENT.get("BIRD_RECOGNITION_SMOKE_IMAGE")
 
 
 @pytest.mark.skipif(

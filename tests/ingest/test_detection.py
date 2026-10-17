@@ -157,6 +157,27 @@ def test_adapter_requests_zero_confidence_and_accepts_no_detections(
     inference.assert_called_once_with(image, model)
 
 
+def test_adapter_skips_boxes_without_visible_area_after_clipping(
+    tmp_path: Path,
+) -> None:
+    model_path, config_path = _files(tmp_path)
+    image = np.zeros((10, 10, 3), dtype=np.uint8)
+    inference = MagicMock(
+        return_value=_result([[-1, -2, 1, 0], [-1, 1, 4, 4]], [0.8, 0.7], [0, 0])
+    )
+    adapter = MegaDetectorAdapter(
+        model_path,
+        config_path,
+        loader=MagicMock(return_value=object()),
+        inference=inference,
+    )
+
+    detections = adapter.detect(image)
+
+    assert len(detections) == 1
+    assert detections[0].box == pytest.approx((0.0, 0.1, 0.4, 0.4))
+
+
 def test_adapter_requests_zero_confidence_from_v6_model(tmp_path: Path) -> None:
     model_path, config_path = _files(tmp_path)
     image = np.zeros((8, 10, 3), dtype=np.uint8)

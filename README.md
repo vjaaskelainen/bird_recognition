@@ -86,26 +86,77 @@ template source and configuration are recorded in
 
 ## Development checks
 
+Run tests from the repository root with the project virtual environment active.
+The project requires Python 3.14 or newer, and pytest is included in the dev
+dependency group. Assuming the existing `.venv` has up-to-date dependencies,
+activate it in your shell first:
+
+```powershell
+# Windows PowerShell
+.\.venv\Scripts\Activate.ps1
+```
+
+```cmd
+:: Windows Command Prompt
+.venv\Scripts\activate.bat
+```
+
+```sh
+# macOS / Linux (POSIX shells)
+source .venv/bin/activate
+```
+
+If `.venv` does not exist yet, create it and install the project dependencies
+from the repository root with `uv sync` before activating it.
+
+If PowerShell blocks the activation script, allow it for the current session
+only, then activate the environment again:
+
+```powershell
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+.\.venv\Scripts\Activate.ps1
+```
+
+Confirm the selected interpreter belongs to `.venv`, then run the complete test
+suite:
+
+```text
+python -c "import pathlib, sys; assert sys.version_info >= (3, 14); assert pathlib.Path(sys.prefix).resolve() == pathlib.Path('.venv').resolve(), sys.executable; print(sys.executable)"
+python -m pytest
+```
+
+The first command must print the interpreter path inside this repository's
+`.venv`; it fails if Python is older than 3.14 or a different environment is active.
+
+Tests use local fixtures and temporary directories; they do not require `.env`,
+PostgreSQL, Ollama, network access, or MegaDetector weights. The real-model
+smoke test is skipped unless all three `BIRD_RECOGNITION_SMOKE_MODEL`,
+`BIRD_RECOGNITION_SMOKE_CONFIG`, and `BIRD_RECOGNITION_SMOKE_IMAGE` values are
+set (for example in `.env`); the paths must point to locally available files.
+With those configured, the smoke test runs as part of the full suite. To run a
+single test file, pass its path, such as `python -m pytest
+tests/ingest/test_detection.py`.
+
 ```powershell
 # Check for lint issues
-uv run ruff check .
+ruff check .
 
 # Apply automatic lint fixes
-uv run ruff check --fix .
+ruff check --fix .
 
 # Format Python files
-uv run ruff format .
+ruff format .
 
 # Check formatting without changing files
-uv run ruff format --check .
+ruff format --check .
 
 # Run all configured pre-commit hooks on tracked files
-uv run pre-commit run --all-files
+pre-commit run --all-files
 ```
 
 The installed pre-commit hook runs Ruff lint fixes and formatting on staged
 Python files before each commit. Review and stage any changes it makes.
 
 GitHub Actions runs Ruff linting, formatting checks, and pytest on every push
-and pull request. The CI test step installs pytest transiently; local development
-dependencies remain defined by `uv.lock`.
+and pull request. Run these checks with the project virtual environment active
+for a local CI-equivalent validation.

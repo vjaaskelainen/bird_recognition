@@ -205,6 +205,10 @@ class MegaDetectorAdapter:
             ):
                 category = self._category(raw_class_id)
                 confidence = float(raw_confidence)
+                if not np.isfinite(confidence) or not 0 <= confidence <= 1:
+                    raise ValueError(
+                        "model confidence must be finite and within [0, 1]"
+                    )
                 left, top, right, bottom = (float(value) for value in box)
                 if not all(np.isfinite(value) for value in (left, top, right, bottom)):
                     raise ValueError("model bounding box coordinates must be finite")
@@ -216,6 +220,11 @@ class MegaDetectorAdapter:
                     max(0.0, min(1.0, right / width)),
                     max(0.0, min(1.0, bottom / height)),
                 )
+                if (
+                    normalized_box[2] <= normalized_box[0]
+                    or normalized_box[3] <= normalized_box[1]
+                ):
+                    continue
                 detections.append(
                     Detection(
                         category=category,
