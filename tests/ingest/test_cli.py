@@ -2,9 +2,113 @@ from pathlib import Path
 
 import pytest
 
-from bird_recognition.cli import main
+from bird_recognition.cli import _build_parser, main
 from bird_recognition.ingest.models import Detection, DetectionCategory
 from tests.ingest.fakes import FakeDetector
+
+
+def test_ingest_cli_uses_dotenv_defaults_and_cli_overrides(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    environment_names = (
+        "BIRD_RECOGNITION_INTERVAL",
+        "BIRD_RECOGNITION_ANIMAL_THRESHOLD",
+        "BIRD_RECOGNITION_PERSON_THRESHOLD",
+        "BIRD_RECOGNITION_EXTENSIONS",
+        "BIRD_RECOGNITION_MEGADETECTOR_MODEL",
+        "BIRD_RECOGNITION_MEGADETECTOR_CONFIG",
+    )
+    for name in environment_names:
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".env").write_text(
+        "\n".join(
+            (
+                "BIRD_RECOGNITION_INTERVAL=2.5",
+                "BIRD_RECOGNITION_ANIMAL_THRESHOLD=0.4",
+                "BIRD_RECOGNITION_PERSON_THRESHOLD=0.6",
+                "BIRD_RECOGNITION_EXTENSIONS=.mp4,.mkv",
+                "BIRD_RECOGNITION_MEGADETECTOR_MODEL=env-model.ckpt",
+                "BIRD_RECOGNITION_MEGADETECTOR_CONFIG=env-config.yaml",
+            )
+        ),
+        encoding="utf-8",
+    )
+
+    parser = _build_parser()
+    default_arguments = parser.parse_args(
+        ["ingest", "--input", "videos", "--output", "crops"]
+    )
+    overridden_arguments = parser.parse_args(
+        [
+            "ingest",
+            "--input",
+            "videos",
+            "--output",
+            "crops",
+            "--interval",
+            "3.0",
+            "--model",
+            "cli-model.ckpt",
+            "--model-config",
+            "cli-config.yaml",
+        ]
+    )
+
+    assert default_arguments.interval == 2.5
+    assert default_arguments.animal_threshold == 0.4
+    assert default_arguments.person_threshold == 0.6
+    assert default_arguments.extensions == ".mp4,.mkv"
+    assert default_arguments.model == Path("env-model.ckpt")
+    assert default_arguments.model_config == Path("env-config.yaml")
+    assert overridden_arguments.interval == 3.0
+    assert overridden_arguments.model == Path("cli-model.ckpt")
+    assert overridden_arguments.model_config == Path("cli-config.yaml")
+
+
+def test_ingest_cli_process_environment_overrides_dotenv(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("BIRD_RECOGNITION_INTERVAL", raising=False)
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".env").write_text("BIRD_RECOGNITION_INTERVAL=2.5\n", encoding="utf-8")
+    monkeypatch.setenv("BIRD_RECOGNITION_INTERVAL", "4.0")
+
+    parser = _build_parser()
+    arguments = parser.parse_args(["ingest", "--input", "videos", "--output", "crops"])
+    overridden_arguments = parser.parse_args(
+        [
+            "ingest",
+            "--input",
+            "videos",
+            "--output",
+            "crops",
+            "--interval",
+            "5.0",
+        ]
+    )
+
+    assert arguments.interval == 4.0
+    assert overridden_arguments.interval == 5.0
+
+
+def test_ingest_cli_ignores_blank_dotenv_model_paths(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("BIRD_RECOGNITION_MEGADETECTOR_MODEL", raising=False)
+    monkeypatch.delenv("BIRD_RECOGNITION_MEGADETECTOR_CONFIG", raising=False)
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".env").write_text(
+        "BIRD_RECOGNITION_MEGADETECTOR_MODEL=\nBIRD_RECOGNITION_MEGADETECTOR_CONFIG=\n",
+        encoding="utf-8",
+    )
+
+    arguments = _build_parser().parse_args(
+        ["ingest", "--input", "videos", "--output", "crops"]
+    )
+
+    assert arguments.model is None
+    assert arguments.model_config is None
 
 
 def test_ingest_cli_requires_paths() -> None:

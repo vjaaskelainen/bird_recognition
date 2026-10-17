@@ -9,6 +9,8 @@ import sys
 from dataclasses import replace
 from pathlib import Path
 
+from dotenv import dotenv_values, find_dotenv
+
 from bird_recognition.ingest.detection import (
     MEGADETECTOR_CONFIG,
     MEGADETECTOR_VARIANT,
@@ -18,6 +20,8 @@ from bird_recognition.ingest.detection import (
 from bird_recognition.ingest.models import IngestSettings, ValidationError
 from bird_recognition.ingest.pipeline import run_batch
 from bird_recognition.ingest.video import discover_videos
+
+_DEFAULT_EXTENSIONS = ".mp4,.mov,.m4v,.mkv,.avi,.mpeg,.mpg"
 
 
 def canonicalize_input(path: str | Path) -> Path:
@@ -63,6 +67,12 @@ def _git_root(path: Path) -> Path | None:
     return Path(result.stdout.strip()).resolve()
 
 
+def _environment_defaults() -> dict[str, str | None]:
+    dotenv_path = find_dotenv(usecwd=True)
+    dotenv_defaults = dotenv_values(dotenv_path) if dotenv_path else {}
+    return {**dotenv_defaults, **os.environ}
+
+
 def validate_destination(input_root: Path, output_root: Path) -> None:
     """Reject overlapping input/output trees and version-controlled destinations."""
     if _overlaps(input_root, output_root):
@@ -97,6 +107,7 @@ def validate_destination(input_root: Path, output_root: Path) -> None:
 
 
 def _build_parser() -> argparse.ArgumentParser:
+    environment = _environment_defaults()
     parser = argparse.ArgumentParser(prog="bird-recognition")
     commands = parser.add_subparsers(dest="command", required=True)
     ingest_parser = commands.add_parser(
@@ -120,17 +131,28 @@ def _build_parser() -> argparse.ArgumentParser:
     ingest_parser.add_argument(
         "--output", required=True, type=Path, help="private output directory"
     )
-    ingest_parser.add_argument("--interval", type=float, default=1.0, metavar="SECONDS")
     ingest_parser.add_argument(
-        "--animal-threshold", type=float, default=0.2, metavar="VALUE"
+        "--interval",
+        type=float,
+        default=environment.get("BIRD_RECOGNITION_INTERVAL") or "1.0",
+        metavar="SECONDS",
     )
     ingest_parser.add_argument(
-        "--person-threshold", type=float, default=0.2, metavar="VALUE"
+        "--animal-threshold",
+        type=float,
+        default=environment.get("BIRD_RECOGNITION_ANIMAL_THRESHOLD") or "0.2",
+        metavar="VALUE",
+    )
+    ingest_parser.add_argument(
+        "--person-threshold",
+        type=float,
+        default=environment.get("BIRD_RECOGNITION_PERSON_THRESHOLD") or "0.2",
+        metavar="VALUE",
     )
     ingest_parser.add_argument(
         "--model",
         type=Path,
-        default=os.environ.get("BIRD_RECOGNITION_MEGADETECTOR_MODEL"),
+        default=environment.get("BIRD_RECOGNITION_MEGADETECTOR_MODEL") or None,
         metavar="PATH",
         help=(
             "local MDV6-mit-yolov9-c weights file; defaults to "
@@ -140,7 +162,7 @@ def _build_parser() -> argparse.ArgumentParser:
     ingest_parser.add_argument(
         "--model-config",
         type=Path,
-        default=os.environ.get("BIRD_RECOGNITION_MEGADETECTOR_CONFIG"),
+        default=environment.get("BIRD_RECOGNITION_MEGADETECTOR_CONFIG") or None,
         metavar="PATH",
         help=(
             f"local {MEGADETECTOR_CONFIG} file; defaults to that filename beside "
@@ -149,7 +171,7 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     ingest_parser.add_argument(
         "--extensions",
-        default=".mp4,.mov,.m4v,.mkv,.avi,.mpeg,.mpg",
+        default=environment.get("BIRD_RECOGNITION_EXTENSIONS") or _DEFAULT_EXTENSIONS,
         help="comma-separated supported filename extensions",
     )
     return parser

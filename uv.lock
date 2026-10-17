@@ -253,6 +253,7 @@ dependencies = [
     { name = "numpy" },
     { name = "omegaconf" },
     { name = "pillow" },
+    { name = "python-dotenv" },
     { name = "pytorchwildlife" },
     { name = "torch" },
 ]
@@ -271,6 +272,7 @@ requires-dist = [
     { name = "numpy", specifier = ">=2.2,<3" },
     { name = "omegaconf", specifier = ">=2.4.0,<3" },
     { name = "pillow", specifier = ">=12.3.0,<13" },
+    { name = "python-dotenv", specifier = ">=1.0,<2" },
     { name = "pytorchwildlife", specifier = "==1.3.0" },
     { name = "torch", specifier = ">=2.14.1,<2.15" },
 ]

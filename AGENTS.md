@@ -12,6 +12,7 @@
 - Do not copy skill contents into this file. Link to [nls-python](.agents/skills/nls-python/SKILL.md) for Python conventions and [nls-ai-housekeeping](.agents/skills/nls-ai-housekeeping/SKILL.md) for instruction and documentation maintenance when relevant.
 - For spec-driven feature work, use the installed spec-kit skills in `.agents/skills/`: `speckit-specify` → `speckit-plan` → `speckit-tasks` → `speckit-implement` → `speckit-converge`. Use `speckit-clarify` or `speckit-analyze` when useful; establish the project constitution once.
 - Keep ingestion footage and generated outputs outside the repository; keep local model/config provisioning and the safe workflow aligned across the [quickstart](specs/001-ingest-videos/quickstart.md), CLI contract, and README.
+- Keep `.env.example` as the complete environment-variable inventory and `.env` as local ignored configuration; CLI options take precedence over process environment, `.env`, and built-in defaults.
 - Refer to [`pyproject.toml`](pyproject.toml) and [`.pre-commit-config.yaml`](.pre-commit-config.yaml) for tooling settings; do not duplicate linter or formatter configuration here.
 - Pin GitHub Actions in workflows to full commit SHAs, with the upstream version in an adjacent comment.
 - Keep `.github/workflows/ci.yml` aligned with the documented lint, format, and test checks.

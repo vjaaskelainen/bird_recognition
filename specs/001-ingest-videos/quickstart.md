@@ -5,6 +5,9 @@ This guide defines local end-to-end validation for [spec.md](spec.md). Ingestion
 ## Prerequisites
 
 - Python 3.14+ and `uv` installed.
+- Create `.env` from `.env.example` if needed, then set local CLI defaults and
+  Compose settings there. The CLI loads it automatically; explicit CLI options
+  take precedence over process environment, `.env`, and built-in defaults.
 - Project environment synchronized by the owner after reviewing the runtime dependency change:
 
   ```powershell
@@ -70,13 +73,11 @@ For an opt-in real-model smoke test, use only a controlled local image/video
 fixture and separately provisioned files. Review labeled local examples against
 absolute animal-recall and person-detection acceptance criteria; a V5 comparison
 is not required. Record misses and false detections before using private batches.
-Set the local paths in PowerShell and run the smoke test explicitly:
+Set all three `BIRD_RECOGNITION_SMOKE_*` paths in `.env` and explicitly run the
+test through `dotenv` so the default pytest suite remains offline:
 
 ```powershell
-$env:BIRD_RECOGNITION_SMOKE_MODEL = "D:\models\MDV6-mit-yolov9-c.ckpt"
-$env:BIRD_RECOGNITION_SMOKE_CONFIG = "D:\models\config_v9c.yaml"
-$env:BIRD_RECOGNITION_SMOKE_IMAGE = "D:\validation\controlled-image.jpg"
-uv run pytest tests/ingest/test_detection_smoke.py -q
+uv run dotenv -f .env run -- pytest tests/ingest/test_detection_smoke.py -q
 ```
 
 The test skips when these paths are not set; it is not part of normal offline
