@@ -9,7 +9,12 @@ import sys
 from dataclasses import replace
 from pathlib import Path
 
-from bird_recognition.ingest.detection import Detector, MegaDetectorAdapter
+from bird_recognition.ingest.detection import (
+    MEGADETECTOR_CONFIG,
+    MEGADETECTOR_VARIANT,
+    Detector,
+    MegaDetectorAdapter,
+)
 from bird_recognition.ingest.models import IngestSettings, ValidationError
 from bird_recognition.ingest.pipeline import run_batch
 from bird_recognition.ingest.video import discover_videos
@@ -98,13 +103,15 @@ def _build_parser() -> argparse.ArgumentParser:
         "ingest",
         help="ingest local trail-camera videos",
         description=(
-            "Filter local videos with a local MegaDetector model and save animal crops."
+            "Filter local videos with MegaDetector V6 MIT YOLOv9-C and save animal "
+            "crops."
         ),
         epilog=(
             "Defaults: interval=1.0s, animal threshold=0.2, person threshold=0.2. "
             "Extensions: .mp4,.mov,.m4v,.mkv,.avi,.mpeg,.mpg. "
             "Lighting rule: pixel-evidence-v1. Keep output outside Git and input. "
-            "Model weights are never downloaded."
+            f"Model variant: {MEGADETECTOR_VARIANT}. Model weights and config are "
+            "local-only; ingestion never downloads them."
         ),
     )
     ingest_parser.add_argument(
@@ -126,8 +133,18 @@ def _build_parser() -> argparse.ArgumentParser:
         default=os.environ.get("BIRD_RECOGNITION_MEGADETECTOR_MODEL"),
         metavar="PATH",
         help=(
-            "local pretrained MegaDetector model file; defaults to "
+            "local MDV6-mit-yolov9-c weights file; defaults to "
             "BIRD_RECOGNITION_MEGADETECTOR_MODEL"
+        ),
+    )
+    ingest_parser.add_argument(
+        "--model-config",
+        type=Path,
+        default=os.environ.get("BIRD_RECOGNITION_MEGADETECTOR_CONFIG"),
+        metavar="PATH",
+        help=(
+            f"local {MEGADETECTOR_CONFIG} file; defaults to that filename beside "
+            "--model or BIRD_RECOGNITION_MEGADETECTOR_CONFIG"
         ),
     )
     ingest_parser.add_argument(
@@ -189,6 +206,11 @@ def main(argv: list[str] | None = None, detector: Detector | None = None) -> int
             person_threshold=arguments.person_threshold,
             extensions=extensions,
             model_path=Path(arguments.model).expanduser() if arguments.model else None,
+            model_config_path=(
+                Path(arguments.model_config).expanduser()
+                if arguments.model_config
+                else None
+            ),
         )
         videos = discover_videos(input_root, settings.extensions)
         if detector is None and videos:
@@ -199,9 +221,26 @@ def main(argv: list[str] | None = None, detector: Detector | None = None) -> int
             model_path = settings.model_path.resolve(strict=True)
             if not model_path.is_file():
                 raise ValidationError(f"MegaDetector model is not a file: {model_path}")
-            settings = replace(settings, model_path=model_path)
+            config_candidate = settings.model_config_path or (
+                model_path.parent / MEGADETECTOR_CONFIG
+            )
             try:
-                detector = MegaDetectorAdapter(model_path)
+                model_config_path = config_candidate.resolve(strict=True)
+            except OSError as error:
+                raise ValidationError(
+                    f"MegaDetector model config cannot be resolved: {config_candidate}"
+                ) from error
+            if not model_config_path.is_file():
+                raise ValidationError(
+                    f"MegaDetector model config is not a file: {model_config_path}"
+                )
+            settings = replace(
+                settings,
+                model_path=model_path,
+                model_config_path=model_config_path,
+            )
+            try:
+                detector = MegaDetectorAdapter(model_path, model_config_path)
             except Exception as error:
                 raise ValidationError(
                     f"MegaDetector preflight failed: {error}"
@@ -210,9 +249,16 @@ def main(argv: list[str] | None = None, detector: Detector | None = None) -> int
                 settings,
                 detector_version=detector.model_version,
                 model_sha256=detector.model_sha256,
+                model_config_sha256=detector.model_config_sha256,
+                model_variant=detector.model_variant,
             )
         if detector is None:
             detector = _NoInferenceDetector()
+        if settings.model_variant != "unconfigured":
+            print(
+                f"Detector model: {settings.model_variant} "
+                f"({settings.detector_version})"
+            )
         summary, report = run_batch(input_root, output_root, settings, detector)
         del summary
         _render_summary(report)

@@ -205,9 +205,14 @@ def settings_identity(settings: IngestSettings) -> tuple[str, str]:
         "person_threshold": settings.person_threshold,
         "extensions": list(settings.extensions),
         "model_path": str(settings.model_path) if settings.model_path else None,
+        "model_config_path": (
+            str(settings.model_config_path) if settings.model_config_path else None
+        ),
+        "model_variant": settings.model_variant,
         "detector_name": settings.detector_name,
         "detector_version": settings.detector_version,
         "model_sha256": settings.model_sha256,
+        "model_config_sha256": settings.model_config_sha256,
         "lighting_rule": settings.lighting_rule,
         "lighting_settings": dict(settings.lighting_settings),
     }

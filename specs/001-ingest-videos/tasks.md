@@ -35,19 +35,19 @@
 
 ### Tests for User Story 1
 
-- [ ] T006 [P] \[US1\] Add PTS sampling tests for elapsed-time-zero sampling, requested interval, actual frame ordinal/time, variable frame timing, short clips, and corrupt/missing sampled-frame handling in `tests/ingest/test_sampling.py`.
-- [ ] T007 [P] \[US1\] Add controlled-detection tests for animal/person/other categories, inclusive category thresholds, person precedence, empty/vehicle-only frames, and no retention after detection failure in `tests/ingest/test_filtering.py`.
-- [ ] T008 [P] \[US1\] Add crop geometry tests for clipped boxes, positive-area validation, pixel-coordinate mapping, and right/bottom-exclusive image regions in `tests/ingest/test_crops.py`.
-- [ ] T009 [P] \[US1\] Add initial command tests for required paths, numeric validation, help, and processing a small fixture with an injected detector in `tests/ingest/test_cli.py`.
+- [x] T006 [P] \[US1\] Add PTS sampling tests for elapsed-time-zero sampling, requested interval, actual frame ordinal/time, variable frame timing, short clips, and corrupt/missing sampled-frame handling in `tests/ingest/test_sampling.py`.
+- [x] T007 [P] \[US1\] Add controlled-detection tests for animal/person/other categories, inclusive category thresholds, person precedence, empty/vehicle-only frames, and no retention after detection failure in `tests/ingest/test_filtering.py`.
+- [x] T008 [P] \[US1\] Add crop geometry tests for clipped boxes, positive-area validation, pixel-coordinate mapping, and right/bottom-exclusive image regions in `tests/ingest/test_crops.py`.
+- [x] T009 [P] \[US1\] Add initial command tests for required paths, numeric validation, help, and processing a small fixture with an injected detector in `tests/ingest/test_cli.py`.
 
 ### Implementation for User Story 1
 
 - [X] T010 [P] \[US1\] Implement single-pass PyAV frame decoding and elapsed-time target sampling with PTS-derived seconds, zero-based decoded frame numbers, VFR handling, short-video first-frame behavior, and safe handling of corrupt or missing sampled-frame timing in `src/bird_recognition/ingest/video.py`.
-- [ ] T011 [P] \[US1\] Implement a detector protocol and local pretrained MegaDetector adapter in `src/bird_recognition/ingest/detection.py`; initialize once per run, normalize outputs to `animal`/`person`/`other`, record model identity/version and SHA-256, and fail closed on load or inference errors without downloading weights.
+- [x] T011 [P] \[US1\] Implement a detector protocol and local pretrained MegaDetector adapter in `src/bird_recognition/ingest/detection.py`; initialize once per run, normalize outputs to `animal`/`person`/`other`, record model identity/version and SHA-256, and fail closed on load or inference errors without downloading weights.
 - [X] T012 [P] \[US1\] Implement box validation/clipping and deterministic local crop encoding in `src/bird_recognition/ingest/crops.py`; store each box as clipped original-frame pixel coordinates `(left, top, right, bottom)` with right/bottom exclusive, reject malformed or zero-area regions, and stage/publish one frame's crops as a complete set or publish none.
 - [X] T013 \[US1\] Implement the sampled-frame filtering pipeline in `src/bird_recognition/ingest/pipeline.py`; evaluate each complete frame once, apply inclusive separate thresholds, give qualifying people precedence, discard no-animal/vehicle-only frames, publish no image for person-excluded or failed-detection frames, and report a crop/storage failure without exposing a partial frame result.
 - [X] T014 \[US1\] Implement the `ingest` argparse command, default interval/threshold values, preflight validation, model configuration, readable help, and the `bird-recognition` console entry point in `src/bird_recognition/cli.py` and `pyproject.toml`.
-- [ ] T015 \[US1\] Integrate fixture decoding, controlled detection, and crop assertions in `tests/ingest/test_cli.py`; verify a frame with multiple safe animal detections yields separate crops and a mixed person/animal frame yields none.
+- [x] T015 \[US1\] Integrate fixture decoding, controlled detection, and crop assertions in `tests/ingest/test_cli.py`; verify a frame with multiple safe animal detections yields separate crops and a mixed person/animal frame yields none.
 
 **Checkpoint**: User Story 1 produces local privacy-filtered crops and can be tested without a model service or database service.
 
@@ -188,4 +188,23 @@ T014 src/bird_recognition/cli.py
 
 
 
+
+## Phase 7: Convergence
+
+- [ ] T037 Verify and record the official MegaDetector API/model format and Python 3.14 compatibility evidence for the declared PyTorch, PyAV, Pillow, and pytest constraints; retain the owner-run `uv sync` requirement per T001 (missing).
+- [ ] T038 Add fixture-driven end-to-end unchanged-rerun, changed-content/settings, and same-basename collision tests that verify output records and files, not only identity helper functions, per T026, US3/AC2-3, and SC-004 (partial).
+- [ ] T039 Add mixed-batch and injected frame/storage-failure integration tests, including interrupted-publication recovery, absence of crop files/records for excluded or failed frames, and exact frame-outcome reconciliation, per T027, T034, US3/AC1/5, and SC-005 (partial).
+- [ ] T040 Extend persisted provenance tests to verify capture-start-plus-PTS derivation, explicit unknown time/timezone, run/source/detection relationships, crop hashes/locations, frame lighting, and exact crop-region equality after reopening the manifest, per T016, T019, T025, US2/AC1-5, and SC-002 (partial).
+- [ ] T041 Validate the lighting classifier against representative verified daylight-color, infrared-night, and ambiguous fixture images rather than only uniform-color images, per T018, US2/AC4, and SC-003 (partial).
+- [ ] T042 Add CLI assertions for partial processing failure, source/frame summaries, and exit codes 0, 1, and 2, per T028, US3/AC1/4, and FR-012 (partial).
+- [ ] T043 After T037 is resolved and required dependencies/model are provisioned, execute the documented local CLI quickstart with a controlled safe fixture and record its outcome alongside the already-passing pytest/Ruff checks, per T036, SC-006, and plan: compatibility gate (partial).
+
+## Phase 8: MegaDetector V6 MIT Compact Integration
+
+- [X] T044 Select `MDV6-mit-yolov9-c`; verify the official PyTorch-Wildlife 1.3.0 wheel exposes `MegaDetectorV6MIT` and that the selected checkpoint uses the MIT variant API.
+- [X] T045 Replace the legacy dependency declaration and implement V6 class/output conversion with explicit local checkpoint/config loading and fail-closed preflight; do not edit `uv.lock`.
+- [X] T046 Record package version, model variant, checkpoint digest, and config digest in effective settings/fingerprints and CLI output.
+- [X] T047 Add offline adapter, CLI, and identity tests, plus an opt-in real-model smoke test.
+- [X] T048 Update the README, quickstart, CLI/data-model contracts, upgrade plan, and repository guidance for local-only V6 provisioning.
+- [ ] T049 After owner-run `uv sync` and separate weight/config provisioning, run the real V6 smoke and reviewed-label absolute acceptance evaluation on the target Python/platform; document results and any required follow-up.
 

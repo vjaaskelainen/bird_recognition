@@ -16,7 +16,7 @@ One CLI invocation with immutable effective settings and aggregate results.
 | `status` | enum | `running`, `complete`, `no_input`, `partial_failure`, `failed`. |
 | `input_root` | absolute path string | Canonical root supplied by owner. |
 | `output_root` | absolute path string | Must be outside Git-tracked content and disjoint from the input tree. |
-| `settings_json` | JSON object | Canonical effective config, including sampling, thresholds, supported extensions, detector/model identity+digest, and lighting rule/version. |
+| `settings_json` | JSON object | Canonical effective config, including sampling, thresholds, supported extensions, detector package/version, exact MegaDetector V6 variant, local checkpoint and config digests, and lighting rule/version. |
 | `settings_fingerprint` | hex digest | SHA-256 of canonical settings serialization. |
 | `summary_json` | JSON object | Counts and failures; frame outcome totals reconcile exactly. |
 

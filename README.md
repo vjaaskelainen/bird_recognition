@@ -20,11 +20,12 @@ tools through `uv run` so they use the locked development dependencies.
 ## Local video ingestion
 
 The `bird-recognition ingest` command scans local video directories recursively
-and writes animal crops with a SQLite provenance manifest. Provision the tested
-PyAV/Pillow dependencies and the official MegaDetector runtime/model locally;
-model weights are never downloaded by ingestion. Until the dependency update is
-approved and synchronized, see the feature [quickstart](specs/001-ingest-videos/quickstart.md)
-for the required owner-run setup.
+and writes animal crops with a SQLite provenance manifest. The selected detector
+is the MIT-licensed MegaDetector V6 variant `MDV6-mit-yolov9-c`. Provision its
+`.ckpt` weights and `config_v9c.yaml` locally, outside Git. Ingestion requires
+both local files and never downloads model weights or configuration. The Python
+3.14 runtime and real-model smoke test remain to be validated; see the feature
+[quickstart](specs/001-ingest-videos/quickstart.md) for setup and the compatibility gate.
 
 Keep the input footage and output directory outside the Git repository and make
 them disjoint. Supported extensions are `.mp4`, `.mov`, `.m4v`, `.mkv`, `.avi`,
@@ -35,7 +36,8 @@ thresholds default to `0.2` and qualify inclusively. For example:
 uv run bird-recognition ingest `
   --input "D:\trail-camera\videos" `
   --output "D:\trail-camera\ingested" `
-  --model "D:\models\megadetector-model-file"
+  --model "D:\models\MDV6-mit-yolov9-c.ckpt" `
+  --model-config "D:\models\config_v9c.yaml"
 ```
 
 The output contains `manifest.sqlite3` and retained crops. The summary separates

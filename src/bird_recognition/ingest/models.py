@@ -62,9 +62,12 @@ class IngestSettings:
         ".mpg",
     )
     model_path: Path | None = None
+    model_config_path: Path | None = None
+    model_variant: str = "unconfigured"
     detector_name: str = "MegaDetector"
     detector_version: str = "unconfigured"
     model_sha256: str | None = None
+    model_config_sha256: str | None = None
     lighting_rule: str = "pixel-evidence-v1"
     lighting_settings: tuple[tuple[str, float], ...] = (
         ("day_min_mean_saturation", 0.16),

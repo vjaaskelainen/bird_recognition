@@ -19,7 +19,10 @@ def test_ingest_cli_help_prints_defaults(capsys: pytest.CaptureFixture[str]) -> 
         main(["ingest", "--help"])
 
     assert result.value.code == 0
-    assert "animal threshold=0.2" in capsys.readouterr().out
+    help_text = capsys.readouterr().out
+    assert "animal threshold=0.2" in help_text
+    assert "MDV6-mit-yolov9-c" in help_text
+    assert "--model-config" in help_text
 
 
 @pytest.mark.parametrize(
@@ -128,3 +131,30 @@ def test_ingest_cli_reports_unreadable_video_failure(
     )
 
     assert result == 1
+
+
+def test_ingest_cli_rejects_missing_local_model_config_before_output(
+    tiny_video: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    input_root = tmp_path / "input"
+    input_root.mkdir()
+    (input_root / tiny_video.name).write_bytes(tiny_video.read_bytes())
+    model_path = tmp_path / "MDV6-mit-yolov9-c.ckpt"
+    model_path.write_bytes(b"local test weights")
+    output_root = tmp_path / "output"
+
+    result = main(
+        [
+            "ingest",
+            "--input",
+            str(input_root),
+            "--output",
+            str(output_root),
+            "--model",
+            str(model_path),
+        ]
+    )
+
+    assert result == 2
+    assert not output_root.exists()
+    assert "model config cannot be resolved" in capsys.readouterr().err
