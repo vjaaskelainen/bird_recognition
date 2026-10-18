@@ -10,7 +10,7 @@
 
 **Purpose**: Add only the runtime/test dependencies and package/test structure needed by the planned CLI workflow.
 
-- [ ] T001 Verify the official MegaDetector inference API/model format and PyTorch, PyAV, Pillow, and pytest compatibility on Python 3.14; declare the tested runtime/development dependency constraints in `pyproject.toml`. Do not edit `uv.lock`; request owner-run `uv sync` per `AGENTS.md`.
+- [X] T001 Verify the official MegaDetector inference API/model format and PyTorch, PyAV, Pillow, and pytest compatibility on Python 3.14; declare the tested runtime/development dependency constraints in `pyproject.toml`. Do not edit `uv.lock`; request owner-run `uv sync` per `AGENTS.md`. **Validated 2026-10-18** on Windows/Python 3.14 after owner-run sync: PyTorch 2.14.1, PyAV 19.0.1, Pillow 12.3.0, PyTorch-Wildlife 1.3.0, pytest 9.1.1; real V6 smoke and full pytest suite passed. See `megadetector-v6-upgrade-plan.md`.
 - [X] T002 Create the planned ingestion package and test package structure with `src/bird_recognition/ingest/__init__.py` and `tests/ingest/__init__.py`.
 - [X] T003 [P] Add reusable tiny synthetic video/frame fixtures and deterministic fake-detector helpers in `tests/ingest/conftest.py`; fixtures must not contain private footage or require model weights/network access.
 
@@ -109,7 +109,7 @@
 **Purpose**: Document safe operation and verify the full feature without weakening privacy or offline testability.
 
 - [X] T035 [P] Document installation/model provisioning, supported video formats, defaults, CLI examples, output safety, privacy limitations, and batch summary interpretation in `README.md` and `specs/001-ingest-videos/quickstart.md`.
-- [ ] T036 Run the documented quickstart scenarios and the complete pytest, Ruff lint, and Ruff format checks from `README.md`; fix feature regressions in the corresponding `src/bird_recognition/ingest/`, `src/bird_recognition/cli.py`, and `tests/ingest/` files.
+- [ ] T036 Run the documented quickstart scenarios and the complete pytest, Ruff lint, and Ruff format checks from `README.md`; fix feature regressions in the corresponding `src/bird_recognition/ingest/`, `src/bird_recognition/cli.py`, and `tests/ingest/` files. Full pytest passed 2026-10-18; documented CLI quickstart and Ruff lint/format checks remain to be recorded.
 
 ---
 
@@ -191,7 +191,7 @@ T014 src/bird_recognition/cli.py
 
 ## Phase 7: Convergence
 
-- [ ] T037 Verify and record the official MegaDetector API/model format and Python 3.14 compatibility evidence for the declared PyTorch, PyAV, Pillow, and pytest constraints; retain the owner-run `uv sync` requirement per T001 (missing).
+- [X] T037 Verify and record the official MegaDetector API/model format and Python 3.14 compatibility evidence for the declared PyTorch, PyAV, Pillow, and pytest constraints; retain the owner-run `uv sync` requirement per T001. Validated 2026-10-18 on Windows/Python 3.14 after owner-run sync; package versions and smoke/full-suite results are recorded in `megadetector-v6-upgrade-plan.md`.
 - [ ] T038 Add fixture-driven end-to-end unchanged-rerun, changed-content/settings, and same-basename collision tests that verify output records and files, not only identity helper functions, per T026, US3/AC2-3, and SC-004 (partial).
 - [ ] T039 Add mixed-batch and injected frame/storage-failure integration tests, including interrupted-publication recovery, absence of crop files/records for excluded or failed frames, and exact frame-outcome reconciliation, per T027, T034, US3/AC1/5, and SC-005 (partial).
 - [ ] T040 Extend persisted provenance tests to verify capture-start-plus-PTS derivation, explicit unknown time/timezone, run/source/detection relationships, crop hashes/locations, frame lighting, and exact crop-region equality after reopening the manifest, per T016, T019, T025, US2/AC1-5, and SC-002 (partial).
@@ -206,5 +206,5 @@ T014 src/bird_recognition/cli.py
 - [X] T046 Record package version, model variant, checkpoint digest, and config digest in effective settings/fingerprints and CLI output.
 - [X] T047 Add offline adapter, CLI, and identity tests, plus an opt-in real-model smoke test.
 - [X] T048 Update the README, quickstart, CLI/data-model contracts, upgrade plan, and repository guidance for local-only V6 provisioning.
-- [ ] T049 After owner-run `uv sync` and separate weight/config provisioning, run the real V6 smoke and reviewed-label absolute acceptance evaluation on the target Python/platform; document results and any required follow-up.
+- [ ] T049 After owner-run `uv sync` and separate weight/config provisioning, run the real V6 smoke and reviewed-label absolute acceptance evaluation on the target Python/platform; document results and any required follow-up. The real-model smoke passed on Windows/Python 3.14 on 2026-10-18; the reviewed-label evaluation and its pre-set absolute acceptance criteria remain outstanding.
 

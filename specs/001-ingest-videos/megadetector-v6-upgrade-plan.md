@@ -1,7 +1,7 @@
 # MegaDetector V6 Upgrade Plan
 
-**Status**: Implementation in progress; real-model smoke pending  
-**Reviewed**: 2026-10-16  
+**Status**: Implementation and Python 3.14 runtime validation complete; reviewed-label evaluation pending  
+**Reviewed**: 2026-10-18  
 **Scope**: Replace the ingestion adapter's legacy MegaDetector integration with the current V6 integration while preserving the local, privacy-first video workflow.
 
 ## Objective
@@ -30,23 +30,32 @@ This is an integration upgrade, not a species-classification feature. MegaDetect
 
 ## Selected decisions and remaining compatibility gates
 
-The model/variant decision is made; the following runtime and data-quality gates remain before real-video use:
+The model/variant decision and target Python 3.14 Windows runtime validation are complete. The reviewed-label model-quality evaluation remains before making claims about local detection quality:
 
 - **V6 variant and license (selected)**: Use `MDV6-mit-yolov9-c`, the MIT-licensed compact model. The official model zoo lists 9.7M parameters and 74.8% animal recall on its benchmark. PyTorch-Wildlife 1.3.0 exposes this exact choice through `MegaDetectorV6MIT`. Revisit it if controlled local evaluation shows it misses acceptance criteria.
-- **Supported platforms and runtime**: The Python 3.14 Windows dependency resolver dry run succeeded; installation and inference still need demonstration. Do not claim support for other platforms until those are tested.
-- **Offline weight loading**: The adapter supplies explicit local checkpoint/config paths and bypasses the package's download-backed config/weight loader. Verify missing/invalid file and no-network behavior in tests and smoke validation.
+- **Supported platforms and runtime**: Installation, smoke inference, and the full pytest suite passed on Windows/Python 3.14 with the locked versions recorded below. Do not claim support for other platforms until those are tested.
+- **Offline weight loading**: The adapter supplies explicit local checkpoint/config paths and bypasses the package's download-backed config/weight loader. The real smoke passed with the locally provisioned checkpoint/config; retain the offline unit tests and fail-closed behavior.
 - **Input image representation**: PyTorch-Wildlife's MIT API accepts RGB HWC arrays; the adapter converts decoded PIL frames to contiguous uint8 RGB arrays and unit tests verify dimensions and pixel values.
 - **Model quality**: On a small, manually reviewed and labeled sample, measure animal recall and person detection against pre-set absolute acceptance criteria. A V5 comparison is not required. Do not claim local accuracy from published model-zoo metrics.
 
 If runtime or smoke validation fails, block real-video use and adapt or revert the integration. Never permit an implicit download or weaken person-first filtering to make a run succeed.
 
-## Gate evaluation (2026-10-16)
+## Earlier gate evaluation (2026-10-16)
 
 Implementation is in progress; these source and resolver checks are not a substitute for a real installation and inference smoke test:
 
 - PyPI's PyTorch-Wildlife 1.3.0 wheel contains `MegaDetectorV6MIT` and the `MDV6-mit-yolov9-c` choice. Its MIT loader normally fetches `config_v9c.yaml`, fetches weights from its configured URL/cache, and reloads model state from single-image inference. The adapter overrides those paths to load the explicit local config/checkpoint and reuse the model within a run.
 - A resolver dry run completed for the selected package on Python 3.14 Windows. No dependency installation or inference has yet been performed, and Linux/macOS support is not established.
 - No model checkpoint, config, or labeled sample is present in the repository workspace. The opt-in real-model smoke test and local quality acceptance evaluation remain pending owner-provisioned local artifacts.
+
+## Validation record (2026-10-18)
+
+Owner-confirmed validation on Windows/Python 3.14, after the owner synchronized the environment with `uv sync`:
+
+- Locked runtime/test versions: PyTorch 2.14.1, PyAV 19.0.1, Pillow 12.3.0, PyTorch-Wildlife 1.3.0, and pytest 9.1.1 (see `../../uv.lock`).
+- The opt-in real-model smoke test passed using the selected `MDV6-mit-yolov9-c` model and `config_v9c.yaml`.
+- The full pytest suite passed.
+- Ruff checks and the controlled reviewed-label evaluation have not been reported as run. The upgrade plan does not yet define numeric local acceptance thresholds; set and document them before measuring animal recall and person detection. The published model-zoo metric is not a substitute for that evaluation.
 
 ## Proposed implementation
 

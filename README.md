@@ -30,8 +30,10 @@ and writes animal crops with a SQLite provenance manifest. The selected detector
 is the MIT-licensed MegaDetector V6 variant `MDV6-mit-yolov9-c`. Provision its
 `.ckpt` weights and `config_v9c.yaml` locally, outside Git. Ingestion requires
 both local files and never downloads model weights or configuration. The Python
-3.14 runtime and real-model smoke test remain to be validated; see the feature
-[quickstart](specs/001-ingest-videos/quickstart.md) for setup and the compatibility gate.
+3.14 Windows runtime, real-model smoke test, and full pytest suite were validated
+on 2026-10-18; locked package versions and remaining model-quality validation are
+recorded in the [V6 upgrade plan](specs/001-ingest-videos/megadetector-v6-upgrade-plan.md).
+See the feature [quickstart](specs/001-ingest-videos/quickstart.md) for setup.
 
 Keep the input footage and output directory outside the Git repository and make
 them disjoint. Supported extensions are `.mp4`, `.mov`, `.m4v`, `.mkv`, `.avi`,

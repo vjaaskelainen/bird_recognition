@@ -11,14 +11,17 @@ This guide defines local end-to-end validation for [spec.md](spec.md). Ingestion
 - Project environment synchronized by the owner after reviewing the runtime dependency change:
 
   ```powershell
-  uv sync
+  .\.venv\Scripts\uv.exe sync
   ```
 
-- **Compatibility gate**: PyTorch-Wildlife 1.3.0 exposes
-  `MegaDetectorV6MIT` with the `MDV6-mit-yolov9-c` variant. The complete Python
-  3.14 platform/runtime combination and real-model smoke test are not yet
-  validated. Keep real-video operation opt-in until those checks pass and the
-  owner synchronizes the dependency lockfile.
+- **Validated target**: Windows/Python 3.14 was validated on 2026-10-18 after
+  owner-run synchronization. The real `MDV6-mit-yolov9-c` smoke test and full
+  pytest suite passed. Locked versions are PyTorch 2.14.1, PyAV 19.0.1,
+  Pillow 12.3.0, PyTorch-Wildlife 1.3.0, and pytest 9.1.1; see the
+  [V6 upgrade plan](megadetector-v6-upgrade-plan.md) for the validation record.
+  This does not establish support for other platforms. A reviewed-label local
+  quality evaluation remains pending, and its absolute acceptance thresholds
+  must be defined before evaluation.
 
 - Provision the **MIT-licensed `MDV6-mit-yolov9-c`** checkpoint (`.ckpt`) and
   its `config_v9c.yaml` separately, outside Git. By default the config must be
@@ -36,8 +39,8 @@ This guide defines local end-to-end validation for [spec.md](spec.md). Ingestion
 Run focused tests, then the full offline test suite:
 
 ```powershell
-uv run pytest tests/ingest
-uv run pytest
+  .\.venv\Scripts\python.exe -m pytest tests\ingest
+  .\.venv\Scripts\python.exe -m pytest
 ```
 
 The fixtures/fake detector should validate:
@@ -77,7 +80,7 @@ Set all three `BIRD_RECOGNITION_SMOKE_*` paths in `.env` and explicitly run the
 test through `dotenv` so the default pytest suite remains offline:
 
 ```powershell
-uv run dotenv -f .env run -- pytest tests/ingest/test_detection_smoke.py -q
+.\.venv\Scripts\uv.exe run dotenv -f .env run -- pytest tests/ingest/test_detection_smoke.py -q
 ```
 
 The test skips when these paths are not set; it is not part of normal offline
