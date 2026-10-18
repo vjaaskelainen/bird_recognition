@@ -61,10 +61,10 @@
 
 ### Tests for User Story 2
 
-- [ ] T016 [P] \[US2\] Add manifest/model tests for required crop provenance, foreign-key relationships, confidence and box constraints, timezone-unknown representation, and common frame lighting across crops in `tests/ingest/test_metadata.py`.
-- [ ] T017 [P] \[US2\] Add capture-time tests for reliable offset timestamps plus elapsed PTS time, local time with unknown timezone, missing/malformed/conflicting metadata, and no filesystem-time fallback in `tests/ingest/test_capture_time.py`.
-- [ ] T018 [P] \[US2\] Add verified color-day, infrared-night, and ambiguous-image tests for the deterministic lighting classifier in `tests/ingest/test_lighting.py`.
-- [ ] T019 [P] \[US2\] Add persistence tests that reopen the output manifest, verify crop file hashes/locations and original-frame boxes, and ensure crop rows never point to missing images in `tests/ingest/test_storage.py`.
+- [X] T016 [P] \[US2\] Add manifest/model tests for required crop provenance, foreign-key relationships, confidence and box constraints, timezone-unknown representation, and common frame lighting across crops in `tests/ingest/test_metadata.py`.
+- [X] T017 [P] \[US2\] Add capture-time tests for reliable offset timestamps plus elapsed PTS time, local time with unknown timezone, missing/malformed/conflicting metadata, and no filesystem-time fallback in `tests/ingest/test_capture_time.py`.
+- [X] T018 [P] \[US2\] Add verified color-day, infrared-night, and ambiguous-image tests for the deterministic lighting classifier in `tests/ingest/test_lighting.py`.
+- [X] T019 [P] \[US2\] Add persistence tests that reopen the output manifest, verify crop file hashes/locations and original-frame boxes, and ensure crop rows never point to missing images in `tests/ingest/test_storage.py`.
 
 ### Implementation for User Story 2
 
