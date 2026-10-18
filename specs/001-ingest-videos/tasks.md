@@ -73,7 +73,7 @@
 - [X] T022 \[US2\] Extend video metadata extraction in `src/bird_recognition/ingest/video.py` to parse only recognized reliable capture-start metadata, preserve explicit timezone offsets, represent timezone ambiguity as unknown, and never use filename, file modification, or ingestion time.
 - [X] T023 \[US2\] Extend crop/run orchestration in `src/bird_recognition/ingest/pipeline.py` to persist all required data-model fields, link each crop to its source/frame/detection/run/settings, share lighting and frame dimensions, and compute stable source/settings/crop identities; preserve operational run time as distinct from capture time and retain explicit unknown capture time/timezone instead of filesystem or ingestion-time fallbacks.
 - [X] T024 \[US2\] Implement frame-level staged image publication and SQLite transaction coordination in `src/bird_recognition/ingest/crops.py` and `src/bird_recognition/ingest/manifest.py`; commit all frame crops/records together only after every image and metadata record is complete, otherwise expose none as successful.
-- [ ] T025 \[US2\] Add end-to-end provenance tests that reopen a completed run and verify timestamp derivation, explicit unknowns, lighting, detection confidence, image dimensions, and crop region equality in `tests/ingest/test_cli.py`.
+- [X] T025 \[US2\] Add end-to-end provenance tests that reopen a completed run and verify timestamp derivation, explicit unknowns, lighting, detection confidence, image dimensions, and crop region equality in `tests/ingest/test_cli.py`.
 
 **Checkpoint**: Each retained crop is durable and independently traceable to its original source frame and effective run settings.
 

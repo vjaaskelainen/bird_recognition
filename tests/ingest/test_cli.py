@@ -1,9 +1,13 @@
+import hashlib
+import sqlite3
+from contextlib import closing
 from pathlib import Path
 
 import pytest
+from PIL import Image
 
 from bird_recognition.cli import _build_parser, main
-from bird_recognition.ingest.models import Detection, DetectionCategory
+from bird_recognition.ingest.models import CaptureTime, Detection, DetectionCategory
 from tests.ingest.fakes import FakeDetector
 
 
@@ -183,6 +187,109 @@ def test_ingest_cli_processes_video_with_injected_detector(
     assert detector.calls > 0
     assert "Run status: complete" in capsys.readouterr().out
     assert len(list((output_root / "crops").rglob("*.jpg"))) == 4
+
+
+@pytest.mark.parametrize(
+    ("capture_start", "capture_timezone", "expected_times"),
+    [
+        pytest.param(
+            CaptureTime("2025-05-01T12:30:00+05:30", "+05:30"),
+            "+05:30",
+            {
+                0: "2025-05-01T12:30:00+05:30",
+                2: "2025-05-01T12:30:01+05:30",
+            },
+            id="offset-capture-start",
+        ),
+        pytest.param(
+            CaptureTime(),
+            None,
+            {0: None, 2: None},
+            id="unknown-capture-start",
+        ),
+    ],
+)
+def test_ingest_cli_reopens_persisted_crop_provenance(
+    tiny_video: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capture_start: CaptureTime,
+    capture_timezone: str | None,
+    expected_times: dict[int, str | None],
+) -> None:
+    from bird_recognition import ingest
+
+    input_root = tmp_path / "input"
+    input_root.mkdir()
+    source = input_root / tiny_video.name
+    source.write_bytes(tiny_video.read_bytes())
+    output_root = tmp_path / "output"
+    monkeypatch.setattr(
+        ingest.pipeline, "capture_start_for_video", lambda _path: capture_start
+    )
+    detector = FakeDetector(
+        [Detection(DetectionCategory.ANIMAL, 0.9, (0.25, 0.25, 0.75, 0.75))]
+    )
+
+    result = main(
+        ["ingest", "--input", str(input_root), "--output", str(output_root)],
+        detector=detector,
+    )
+
+    assert result == 0
+    with closing(sqlite3.connect(output_root / "manifest.sqlite3")) as connection:
+        connection.row_factory = sqlite3.Row
+        rows = connection.execute(
+            "SELECT r.status AS run_status,rs.status AS source_status,"
+            "s.capture_start,s.capture_timezone,f.frame_number,"
+            "f.elapsed_seconds AS frame_elapsed,f.capture_time AS frame_capture_time,"
+            "f.capture_timezone AS frame_timezone,f.lighting AS frame_lighting,"
+            "d.confidence AS detection_confidence,c.elapsed_seconds AS crop_elapsed,"
+            "c.capture_time AS crop_capture_time,c.capture_timezone AS crop_timezone,"
+            "c.lighting AS crop_lighting,c.confidence,c.frame_width,c.frame_height,"
+            "c.image_path,c.crop_sha256,c.box_left,c.box_top,c.box_right,c.box_bottom "
+            "FROM animal_crop c "
+            "JOIN sampled_frame f USING(source_id,settings_fingerprint,frame_number) "
+            "JOIN detection d USING(detection_id,source_id,settings_fingerprint,"
+            "frame_number) "
+            "JOIN run_source rs USING(source_id,settings_fingerprint,run_id) "
+            "JOIN source_video s USING(source_id) "
+            "JOIN ingestion_run r USING(run_id) "
+            "ORDER BY f.frame_number"
+        ).fetchall()
+        foreign_key_errors = connection.execute("PRAGMA foreign_key_check").fetchall()
+
+    assert len(rows) == 2
+    assert foreign_key_errors == []
+    for row in rows:
+        frame_number = row["frame_number"]
+        assert frame_number in expected_times
+        expected_time = expected_times[frame_number]
+        assert row["run_status"] == "complete"
+        assert row["source_status"] == "processed"
+        assert row["capture_start"] == capture_start.local_time
+        assert row["capture_timezone"] == capture_timezone
+        assert row["frame_elapsed"] == row["crop_elapsed"]
+        assert row["frame_capture_time"] == row["crop_capture_time"] == expected_time
+        assert row["frame_timezone"] == row["crop_timezone"] == capture_timezone
+        assert row["frame_lighting"] == row["crop_lighting"]
+        assert row["frame_lighting"] in {"day", "night", "unknown"}
+        assert row["confidence"] == row["detection_confidence"] == 0.9
+        assert (row["frame_width"], row["frame_height"]) == (32, 24)
+        assert (
+            row["box_left"],
+            row["box_top"],
+            row["box_right"],
+            row["box_bottom"],
+        ) == (8, 6, 24, 18)
+        image_path = (output_root / row["image_path"]).resolve()
+        assert output_root.resolve() in image_path.parents
+        assert hashlib.sha256(image_path.read_bytes()).hexdigest() == row["crop_sha256"]
+        with Image.open(image_path) as image:
+            assert image.size == (
+                row["box_right"] - row["box_left"],
+                row["box_bottom"] - row["box_top"],
+            )
 
 
 def test_ingest_cli_person_detection_prevents_all_frame_crops(
