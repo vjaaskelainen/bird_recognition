@@ -87,9 +87,9 @@
 
 ### Tests for User Story 3
 
-- [ ] T026 [P] \[US3\] Add unchanged-rerun, changed-content/settings, and same-basename collision tests in `tests/ingest/test_idempotence.py`.
-- [ ] T027 [P] \[US3\] Add mixed readable/unreadable batch, per-frame failure, crop-write failure, interrupted-publication recovery, and frame-count reconciliation tests in `tests/ingest/test_batch.py`.
-- [ ] T028 [P] \[US3\] Add CLI tests for empty input, source/frame summaries, partial/total failure status, and exit codes `0`, `1`, and `2` in `tests/ingest/test_cli.py`.
+- [X] T026 [P] \[US3\] Add unchanged-rerun, changed-content/settings, and same-basename collision tests in `tests/ingest/test_idempotence.py`.
+- [X] T027 [P] \[US3\] Add mixed readable/unreadable batch, per-frame failure, crop-write failure, interrupted-publication recovery, and frame-count reconciliation tests in `tests/ingest/test_batch.py`.
+- [X] T028 [P] \[US3\] Add CLI tests for empty input, source/frame summaries, partial/total failure status, and exit codes `0`, `1`, and `2` in `tests/ingest/test_cli.py`.
 
 ### Implementation for User Story 3
 
@@ -98,7 +98,7 @@
 - [X] T031 \[US3\] Implement destination writer locking, stale staging cleanup, orphan crop-directory reconciliation, and rollback/cleanup of failed frame publication in `src/bird_recognition/ingest/manifest.py` and `src/bird_recognition/ingest/crops.py`.
 - [X] T032 \[US3\] Implement batch/source/frame failure isolation and run summary accounting in `src/bird_recognition/ingest/pipeline.py`; report processed/skipped/failed videos, sampled frames, each mutually exclusive frame outcome, and crops as a separate count.
 - [X] T033 \[US3\] Complete CLI preflight, no-input messaging, per-source actionable errors, summary rendering, and exit-code mapping in `src/bird_recognition/cli.py`; reject invalid values/unsafe paths before producing outputs.
-- [ ] T034 \[US3\] Complete fixture-driven batch and recovery integration tests in `tests/ingest/test_batch.py`; assert sampled-frame totals equal person-excluded + no-animal + retained + failed, with no crop files/records for person-excluded or failed frames.
+- [X] T034 \[US3\] Complete fixture-driven batch and recovery integration tests in `tests/ingest/test_batch.py`; assert sampled-frame totals equal person-excluded + no-animal + retained + failed, with no crop files/records for person-excluded or failed frames.
 
 **Checkpoint**: A local owner can review a complete/partial batch and safely repeat or recover it without duplicate or incomplete results.
 

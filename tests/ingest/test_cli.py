@@ -7,8 +7,14 @@ import pytest
 from PIL import Image
 
 from bird_recognition.cli import _build_parser, main
-from bird_recognition.ingest.models import CaptureTime, Detection, DetectionCategory
-from tests.ingest.fakes import FakeDetector
+from bird_recognition.ingest import pipeline
+from bird_recognition.ingest.models import (
+    CaptureTime,
+    Detection,
+    DetectionCategory,
+    SampledFrame,
+)
+from tests.ingest.fakes import FakeDetector, ScriptedDetector
 
 
 def test_ingest_cli_uses_dotenv_defaults_and_cli_overrides(
@@ -369,3 +375,40 @@ def test_ingest_cli_rejects_missing_local_model_config_before_output(
     assert result == 2
     assert not output_root.exists()
     assert "model config cannot be resolved" in capsys.readouterr().err
+
+
+def test_ingest_cli_reports_partial_failure_counts_and_exit_code(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    input_root = tmp_path / "input"
+    input_root.mkdir()
+    (input_root / "a-broken.mp4").write_bytes(b"not a video")
+    (input_root / "b-camera.mp4").write_bytes(b"controlled source")
+    (input_root / "c-camera.mp4").write_bytes(b"successful source")
+    frame = SampledFrame(0, 0.0, 32, 24, Image.new("RGB", (32, 24), "blue"))
+    monkeypatch.setattr(
+        pipeline, "sample_video", lambda _path, _settings: iter((frame,))
+    )
+    monkeypatch.setattr(
+        pipeline, "capture_start_for_video", lambda _path: CaptureTime()
+    )
+    detector = ScriptedDetector(
+        [
+            RuntimeError("controlled inference failure"),
+            [Detection(DetectionCategory.ANIMAL, 0.9, (0.1, 0.1, 0.8, 0.8))],
+        ]
+    )
+    result = main(
+        ["ingest", "--input", str(input_root), "--output", str(tmp_path / "output")],
+        detector=detector,
+    )
+    captured = capsys.readouterr()
+    assert result == 1
+    assert "Run status: partial_failure" in captured.out
+    assert "Processed Sources: 1" in captured.out
+    assert "Failed Sources: 2" in captured.out
+    assert "Sampled: 3" in captured.out
+    assert "Retained: 1" in captured.out
+    assert "Failed: 2" in captured.out
+    assert "Crops: 1" in captured.out
+    assert "controlled inference failure" in captured.err
