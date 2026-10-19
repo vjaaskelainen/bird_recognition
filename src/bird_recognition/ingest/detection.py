@@ -153,10 +153,36 @@ class MegaDetectorAdapter:
                 self.url = None
                 self._ingest_model_loaded = True
 
+            def _verify_weights(self, weight_path: Path, config_path: Path) -> None:
+                import torch
+
+                checkpoint = torch.load(
+                    weight_path, map_location="cpu", weights_only=False
+                )
+                weights = checkpoint.get("state_dict", checkpoint)
+                weights = {
+                    key.removeprefix("model.model."): value
+                    for key, value in weights.items()
+                }
+                expected = self.model.model.state_dict()
+                missing = [k for k in expected if k not in weights]
+                mismatched = [
+                    k
+                    for k, v in expected.items()
+                    if k in weights and weights[k].shape != v.shape
+                ]
+                if missing or mismatched:
+                    raise DetectionError(
+                        f"MegaDetector weights do not match {config_path.name}: "
+                        f"{len(missing)} missing "
+                        f"and {len(mismatched)} mismatched tensors"
+                    )
+
         model = LocalMegaDetectorV6MIT(
             weights=str(model_path), device="cpu", version=variant
         )
         model._load_model(weights=str(model_path), device="cpu", url=None)
+        model._verify_weights(model_path, config_path)
         return model
 
     def detect(self, image: object) -> tuple[Detection, ...]:
