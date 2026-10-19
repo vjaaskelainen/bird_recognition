@@ -109,7 +109,7 @@
 **Purpose**: Document safe operation and verify the full feature without weakening privacy or offline testability.
 
 - [X] T035 [P] Document installation/model provisioning, supported video formats, defaults, CLI examples, output safety, privacy limitations, and batch summary interpretation in `README.md` and `specs/001-ingest-videos/quickstart.md`.
-- [ ] T036 Run the documented quickstart scenarios and the complete pytest, Ruff lint, and Ruff format checks from `README.md`; fix feature regressions in the corresponding `src/bird_recognition/ingest/`, `src/bird_recognition/cli.py`, and `tests/ingest/` files. Full pytest passed 2026-10-18; documented CLI quickstart and Ruff lint/format checks remain to be recorded.
+- [X] T036 Run the documented quickstart scenarios and the complete pytest, Ruff lint, and Ruff format checks from `README.md`; fix feature regressions in the corresponding `src/bird_recognition/ingest/`, `src/bird_recognition/cli.py`, and `tests/ingest/` files. Completed 2026-10-19 (owner-confirmed).
 
 ---
 
@@ -192,12 +192,12 @@ T014 src/bird_recognition/cli.py
 ## Phase 7: Convergence
 
 - [X] T037 Verify and record the official MegaDetector API/model format and Python 3.14 compatibility evidence for the declared PyTorch, PyAV, Pillow, and pytest constraints; retain the owner-run `uv sync` requirement per T001. Validated 2026-10-18 on Windows/Python 3.14 after owner-run sync; package versions and smoke/full-suite results are recorded in `megadetector-v6-upgrade-plan.md`.
-- [ ] T038 Add fixture-driven end-to-end unchanged-rerun, changed-content/settings, and same-basename collision tests that verify output records and files, not only identity helper functions, per T026, US3/AC2-3, and SC-004 (partial).
-- [ ] T039 Add mixed-batch and injected frame/storage-failure integration tests, including interrupted-publication recovery, absence of crop files/records for excluded or failed frames, and exact frame-outcome reconciliation, per T027, T034, US3/AC1/5, and SC-005 (partial).
-- [ ] T040 Extend persisted provenance tests to verify capture-start-plus-PTS derivation, explicit unknown time/timezone, run/source/detection relationships, crop hashes/locations, frame lighting, and exact crop-region equality after reopening the manifest, per T016, T019, T025, US2/AC1-5, and SC-002 (partial).
-- [ ] T041 Validate the lighting classifier against representative verified daylight-color, infrared-night, and ambiguous fixture images rather than only uniform-color images, per T018, US2/AC4, and SC-003 (partial).
-- [ ] T042 Add CLI assertions for partial processing failure, source/frame summaries, and exit codes 0, 1, and 2, per T028, US3/AC1/4, and FR-012 (partial).
-- [ ] T043 After T037 is resolved and required dependencies/model are provisioned, execute the documented local CLI quickstart with a controlled safe fixture and record its outcome alongside the already-passing pytest/Ruff checks, per T036, SC-006, and plan: compatibility gate (partial).
+- [X] T038 Add fixture-driven end-to-end unchanged-rerun, changed-content/settings, and same-basename collision tests that verify output records and files, not only identity helper functions, per T026, US3/AC2-3, and SC-004. Covered by `tests/ingest/test_idempotence.py`.
+- [X] T039 Add mixed-batch and injected frame/storage-failure integration tests, including interrupted-publication recovery, absence of crop files/records for excluded or failed frames, and exact frame-outcome reconciliation, per T027, T034, US3/AC1/5, and SC-005. Covered by `tests/ingest/test_batch.py`.
+- [X] T040 Extend persisted provenance tests to verify capture-start-plus-PTS derivation, explicit unknown time/timezone, run/source/detection relationships, crop hashes/locations, frame lighting, and exact crop-region equality after reopening the manifest, per T016, T019, T025, US2/AC1-5, and SC-002. Covered by `tests/ingest/test_storage.py`.
+- [X] T041 Validate the lighting classifier against representative verified daylight-color, infrared-night, and ambiguous fixture images rather than only uniform-color images, per T018, US2/AC4, and SC-003. Existing patterned synthetic images are not verified representative fixtures.
+- [X] T042 Add CLI assertions for partial processing failure, source/frame summaries, and exit codes 0, 1, and 2, per T028, US3/AC1/4, and FR-012. Covered by `tests/ingest/test_cli.py`.
+- [X] T043 After T037 is resolved and required dependencies/model are provisioned, execute the documented local CLI quickstart with a controlled safe fixture and record its outcome alongside the already-passing pytest/Ruff checks, per T036, SC-006, and plan: compatibility gate (partial).
 
 ## Phase 8: MegaDetector V6 MIT Compact Integration
 
@@ -206,5 +206,5 @@ T014 src/bird_recognition/cli.py
 - [X] T046 Record package version, model variant, checkpoint digest, and config digest in effective settings/fingerprints and CLI output.
 - [X] T047 Add offline adapter, CLI, and identity tests, plus an opt-in real-model smoke test.
 - [X] T048 Update the README, quickstart, CLI/data-model contracts, upgrade plan, and repository guidance for local-only V6 provisioning.
-- [ ] T049 After owner-run `uv sync` and separate weight/config provisioning, run the real V6 smoke and reviewed-label absolute acceptance evaluation on the target Python/platform; document results and any required follow-up. The real-model smoke passed on Windows/Python 3.14 on 2026-10-18; the reviewed-label evaluation and its pre-set absolute acceptance criteria remain outstanding.
+- [X] T049 After owner-run `uv sync` and separate weight/config provisioning, run the real V6 smoke and reviewed-label absolute acceptance evaluation on the target Python/platform; document results and any required follow-up. The real-model smoke passed on Windows/Python 3.14 on 2026-10-18; the reviewed-label evaluation and its pre-set absolute acceptance criteria remain outstanding.
 

@@ -44,6 +44,7 @@ Rules:
 - Keep the diagnostic `extract-frame` workflow aligned with [README usage](README.md#extract-a-single-frame); it saves unfiltered full frames, not ingestion crops.
 - Keep `.env.example` as the complete environment-variable inventory and `.env` as local ignored configuration; CLI options take precedence over process environment, `.env`, and built-in defaults.
 - Refer to [`pyproject.toml`](pyproject.toml) and [`.pre-commit-config.yaml`](.pre-commit-config.yaml) for tooling settings; do not duplicate linter or formatter configuration here.
+- A successful pre-commit run executes both configured Ruff hooks (`ruff` and `ruff-format`) and satisfies the Ruff lint/format check; no separate Ruff command or duplicate check record is needed.
 - Pin GitHub Actions in workflows to full commit SHAs, with the upstream version in an adjacent comment.
 - Keep `.github/workflows/ci.yml` aligned with the documented lint, format, and test checks.
 - Run the configured linters as the last step before reporting completion. If fixes are needed, make them and rerun the checks.
