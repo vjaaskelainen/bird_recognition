@@ -61,6 +61,31 @@ Optional CLI defaults, including model paths, can be set in `.env`; explicit
 CLI options override process environment values, which override `.env` values.
 See [`.env.example`](.env.example) for the complete variable list.
 
+## Extract a single frame
+
+Extract a full-resolution PNG without loading MegaDetector:
+
+```powershell
+.\.venv\Scripts\uv.exe run bird-recognition extract-frame `
+  --input "D:\trail-camera\videos\camera.mp4" `
+  --timestamp 2.5 `
+  --output "D:\trail-camera\frames"
+```
+
+The timestamp must be finite and non-negative, in seconds relative to the first
+decoded frame. The command saves the first frame at or after that time as
+`camera.mp4_frame_2.5s.png` and prints its path. It creates the output directory
+when a matching frame is found and refuses to overwrite existing images.
+Requests beyond the last frame fail rather than returning an earlier frame.
+Exit codes are `0` for success, `1` for decoding/timing failures, and `2` for
+invalid inputs or destinations. The reusable `extract_frame` helper in
+`bird_recognition.cli` accepts the same three inputs and returns the saved path.
+
+Keep input footage and output outside Git, with the output separate from the
+input video's directory tree. Unlike ingestion, extraction performs **no person
+filtering**: full frames may contain people or other sensitive content. Keep
+them private and review them before sharing.
+
 ## Local database
 
 Start the local Postgres + pgvector service with Podman Compose:

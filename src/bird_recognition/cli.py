@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import argparse
+import math
 import os
 import subprocess
 import sys
+from contextlib import closing
 from dataclasses import replace
 from pathlib import Path
 
@@ -17,9 +19,13 @@ from bird_recognition.ingest.detection import (
     Detector,
     MegaDetectorAdapter,
 )
-from bird_recognition.ingest.models import IngestSettings, ValidationError
+from bird_recognition.ingest.models import (
+    IngestSettings,
+    ProcessingError,
+    ValidationError,
+)
 from bird_recognition.ingest.pipeline import run_batch
-from bird_recognition.ingest.video import discover_videos
+from bird_recognition.ingest.video import discover_videos, iter_video_frames
 
 _DEFAULT_EXTENSIONS = ".mp4,.mov,.m4v,.mkv,.avi,.mpeg,.mpg"
 
@@ -106,6 +112,56 @@ def validate_destination(input_root: Path, output_root: Path) -> None:
                     )
 
 
+def extract_frame(
+    input_video: str | Path, timestamp: float, output_folder: str | Path
+) -> Path:
+    """Save the first frame at or after elapsed seconds as PNG; return its path."""
+    if not math.isfinite(timestamp) or timestamp < 0:
+        raise ValidationError("timestamp must be finite and non-negative")
+    source = Path(input_video).expanduser().resolve(strict=True)
+    if not source.is_file():
+        raise ValidationError(f"input video is not a file: {source}")
+    output_root = canonicalize_output(output_folder)
+    validate_destination(source.parent, output_root)
+    destination = output_root / f"{source.name}_frame_{timestamp}s.png"
+    if destination.exists():
+        raise ValidationError(f"output image already exists: {destination}")
+    start_time = None
+    last_elapsed = -1.0
+    with closing(iter_video_frames(source)) as frames:
+        for frame_number, pts, time_base, image in frames:
+            if pts is None or time_base is None or time_base <= 0:
+                raise ProcessingError(
+                    f"frame timing is unavailable at frame {frame_number} (PTS)"
+                )
+            presentation_time = pts * time_base
+            if start_time is None:
+                start_time = presentation_time
+            elapsed = float(presentation_time - start_time)
+            if not math.isfinite(elapsed) or elapsed <= last_elapsed:
+                raise ProcessingError(
+                    f"non-monotonic frame timing at frame {frame_number} (PTS)"
+                )
+            last_elapsed = elapsed
+            if elapsed < timestamp:
+                continue
+            output_root.mkdir(parents=True, exist_ok=True)
+            try:
+                output = destination.open("xb")
+            except FileExistsError as error:
+                raise ValidationError(
+                    f"output image already exists: {destination}"
+                ) from error
+            try:
+                with output:
+                    image.save(output, format="PNG")
+            except Exception as error:
+                destination.unlink(missing_ok=True)
+                raise ProcessingError(f"failed to save frame: {error}") from error
+            return destination
+    raise ProcessingError(f"no frame at or after {timestamp} seconds: {source}")
+
+
 def _build_parser() -> argparse.ArgumentParser:
     environment = _environment_defaults()
     parser = argparse.ArgumentParser(prog="bird-recognition")
@@ -174,6 +230,24 @@ def _build_parser() -> argparse.ArgumentParser:
         default=environment.get("BIRD_RECOGNITION_EXTENSIONS") or _DEFAULT_EXTENSIONS,
         help="comma-separated supported filename extensions",
     )
+    frame_parser = commands.add_parser(
+        "extract-frame",
+        help="save a full-resolution video frame as PNG",
+        description=(
+            "Save the first frame at or after the requested seconds from the first "
+            "decoded frame. No detector or privacy filtering is applied. Keep "
+            "input and output outside Git and in disjoint directories."
+        ),
+    )
+    frame_parser.add_argument(
+        "--input", required=True, type=Path, help="input video file"
+    )
+    frame_parser.add_argument(
+        "--timestamp", required=True, type=float, metavar="SECONDS"
+    )
+    frame_parser.add_argument(
+        "--output", required=True, type=Path, help="private output directory"
+    )
     return parser
 
 
@@ -218,6 +292,12 @@ def main(argv: list[str] | None = None, detector: Detector | None = None) -> int
     parser = _build_parser()
     arguments = parser.parse_args(argv)
     try:
+        if arguments.command == "extract-frame":
+            destination = extract_frame(
+                arguments.input, arguments.timestamp, arguments.output
+            )
+            print(f"Saved frame: {destination}")
+            return 0
         input_root = canonicalize_input(arguments.input)
         output_root = canonicalize_output(arguments.output)
         validate_destination(input_root, output_root)
@@ -289,7 +369,10 @@ def main(argv: list[str] | None = None, detector: Detector | None = None) -> int
         print(f"Preflight error: {error}", file=sys.stderr)
         return 2
     except Exception as error:
-        print(f"Ingestion error: {error}", file=sys.stderr)
+        label = (
+            "Frame extraction" if arguments.command == "extract-frame" else "Ingestion"
+        )
+        print(f"{label} error: {error}", file=sys.stderr)
         return 1
 
 
