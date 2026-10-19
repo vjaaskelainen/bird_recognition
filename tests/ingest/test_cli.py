@@ -351,8 +351,13 @@ def test_ingest_cli_reports_unreadable_video_failure(
 
 
 def test_ingest_cli_rejects_missing_local_model_config_before_output(
-    tiny_video: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    tiny_video: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("BIRD_RECOGNITION_MEGADETECTOR_CONFIG", raising=False)
     input_root = tmp_path / "input"
     input_root.mkdir()
     (input_root / tiny_video.name).write_bytes(tiny_video.read_bytes())

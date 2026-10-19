@@ -74,6 +74,7 @@ def test_adapter_loads_pinned_mit_api_without_downloads(tmp_path: Path) -> None:
     model_path, config_path = _files(tmp_path)
     model_instance = MagicMock()
     model_instance.to.return_value = model_instance
+    model_instance.state_dict.return_value = {"weight": SimpleNamespace(shape=(2,))}
     package_model = MagicMock(return_value=model_instance)
     package_converter = MagicMock(return_value=object())
     package_postprocess = MagicMock(return_value=object())
@@ -84,6 +85,11 @@ def test_adapter_loads_pinned_mit_api_without_downloads(tmp_path: Path) -> None:
     omega_conf = ModuleType("omegaconf")
     config_loader = MagicMock(return_value=model_config)
     omega_conf.OmegaConf = SimpleNamespace(load=config_loader)
+    torch = ModuleType("torch")
+    checkpoint_loader = MagicMock(
+        return_value={"state_dict": {"weight": SimpleNamespace(shape=(2,))}}
+    )
+    torch.load = checkpoint_loader
     wildlife = ModuleType("PytorchWildlife")
     wildlife.__path__ = []
     models = ModuleType("PytorchWildlife.models")
@@ -114,6 +120,7 @@ def test_adapter_loads_pinned_mit_api_without_downloads(tmp_path: Path) -> None:
     wildlife.models = models
     modules = {
         "omegaconf": omega_conf,
+        "torch": torch,
         "PytorchWildlife": wildlife,
         "PytorchWildlife.models": models,
         "PytorchWildlife.models.detection": detection,
@@ -127,6 +134,9 @@ def test_adapter_loads_pinned_mit_api_without_downloads(tmp_path: Path) -> None:
         )
         model._load_model(weights=str(model_path.resolve()), device="cpu", url=None)
 
+    checkpoint_loader.assert_called_once_with(
+        model_path.resolve(), map_location="cpu", weights_only=False
+    )
     assert model.url is None
     assert model._ingest_model_loaded is True
     assert model.weights == str(model_path.resolve())
