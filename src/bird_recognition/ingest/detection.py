@@ -11,7 +11,7 @@ from typing import Protocol
 from bird_recognition.ingest.models import Detection, DetectionCategory, DetectionError
 
 MEGADETECTOR_VARIANT = "MDV6-mit-yolov9-c"
-MEGADETECTOR_CONFIG = "config_v9c.yaml"
+MEGADETECTOR_CONFIG = "config_v9s.yaml"
 
 
 class Detector(Protocol):

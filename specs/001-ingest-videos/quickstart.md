@@ -24,13 +24,13 @@ This guide defines local end-to-end validation for [spec.md](spec.md). Ingestion
   must be defined before evaluation.
 
 - Provision the **MIT-licensed `MDV6-mit-yolov9-c`** checkpoint (`.ckpt`) and
-  its `config_v9c.yaml` separately, outside Git. By default the config must be
+  its `config_v9s.yaml` separately, outside Git. By default the config must be
   beside the checkpoint; otherwise pass `--model-config` or set
   `BIRD_RECOGNITION_MEGADETECTOR_CONFIG`. Pass the checkpoint with `--model` or
   set `BIRD_RECOGNITION_MEGADETECTOR_MODEL`. Ingestion requires both local files
   and never downloads weights or configuration. The upstream files are the
   [MIT checkpoint](https://zenodo.org/records/15398270/files/MDV6-mit-yolov9-c.ckpt?download=1)
-  and [YOLOv9-C config](https://zenodo.org/records/15178680/files/config_v9c.yaml?download=1);
+  and [YOLOv9-C config](https://zenodo.org/records/15178680/files/config_v9s.yaml?download=1);
   provision them manually and review the model's license before use.
 - A temporary input directory containing local videos in documented supported formats. Tests use generated miniature fixtures and fake detections rather than private footage or a real model.
 
@@ -65,7 +65,7 @@ uv run bird-recognition ingest `
   --animal-threshold 0.2 `
   --person-threshold 0.2 `
   --model "D:\models\MDV6-mit-yolov9-c.ckpt" `
-  --model-config "D:\models\config_v9c.yaml"
+  --model-config "D:\models\config_v9s.yaml"
 ```
 
 Use `uv run bird-recognition ingest --help` to inspect supported options,

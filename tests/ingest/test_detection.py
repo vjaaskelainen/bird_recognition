@@ -16,7 +16,7 @@ from bird_recognition.ingest.models import DetectionCategory, DetectionError
 
 def _files(tmp_path: Path) -> tuple[Path, Path]:
     model_path = tmp_path / "weights.ckpt"
-    config_path = tmp_path / "config_v9c.yaml"
+    config_path = tmp_path / "config_v9s.yaml"
     model_path.write_bytes(b"local model")
     config_path.write_text("model: {}\ntask: {}\n", encoding="utf-8")
     return model_path, config_path

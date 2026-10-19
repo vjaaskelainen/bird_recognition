@@ -23,7 +23,7 @@ Run from a synced project environment as `uv run bird-recognition ingest ...`.
 | `--animal-threshold VALUE` | `0.2` | Finite confidence in `[0,1]`; animal boxes qualify at or above this value. `BIRD_RECOGNITION_ANIMAL_THRESHOLD` supplies its default. |
 | `--person-threshold VALUE` | `0.2` | Finite confidence in `[0,1]`; one qualifying person excludes the whole frame. `BIRD_RECOGNITION_PERSON_THRESHOLD` supplies its default. |
 | `--model PATH` | configured local model path | Local `MDV6-mit-yolov9-c` `.ckpt` weights; default is `BIRD_RECOGNITION_MEGADETECTOR_MODEL` when set. |
-| `--model-config PATH` | `config_v9c.yaml` beside `--model` | Local MIT YOLOv9-C architecture config; override the path or set `BIRD_RECOGNITION_MEGADETECTOR_CONFIG`. |
+| `--model-config PATH` | `config_v9s.yaml` beside `--model` | Local MIT YOLOv9-C architecture config; override the path or set `BIRD_RECOGNITION_MEGADETECTOR_CONFIG`. |
 | `--extensions LIST` | documented built-in allowlist | Optional explicit comma-separated supported extensions; default allowlist is `.mp4`, `.mov`, `.m4v`, `.mkv`, `.avi`, `.mpeg`, `.mpg` (case-insensitive). `BIRD_RECOGNITION_EXTENSIONS` supplies its default. |
 | `--help` | — | Print usage and available supported formats/settings. |
 

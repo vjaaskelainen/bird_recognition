@@ -44,7 +44,7 @@ If runtime or smoke validation fails, block real-video use and adapt or revert t
 
 Implementation is in progress; these source and resolver checks are not a substitute for a real installation and inference smoke test:
 
-- PyPI's PyTorch-Wildlife 1.3.0 wheel contains `MegaDetectorV6MIT` and the `MDV6-mit-yolov9-c` choice. Its MIT loader normally fetches `config_v9c.yaml`, fetches weights from its configured URL/cache, and reloads model state from single-image inference. The adapter overrides those paths to load the explicit local config/checkpoint and reuse the model within a run.
+- PyPI's PyTorch-Wildlife 1.3.0 wheel contains `MegaDetectorV6MIT` and the `MDV6-mit-yolov9-c` choice. Its MIT loader normally fetches `config_v9s.yaml`, fetches weights from its configured URL/cache, and reloads model state from single-image inference. The adapter overrides those paths to load the explicit local config/checkpoint and reuse the model within a run.
 - A resolver dry run completed for the selected package on Python 3.14 Windows. No dependency installation or inference has yet been performed, and Linux/macOS support is not established.
 - No model checkpoint, config, or labeled sample is present in the repository workspace. The opt-in real-model smoke test and local quality acceptance evaluation remain pending owner-provisioned local artifacts.
 
@@ -53,7 +53,7 @@ Implementation is in progress; these source and resolver checks are not a substi
 Owner-confirmed validation on Windows/Python 3.14, after the owner synchronized the environment with `uv sync`:
 
 - Locked runtime/test versions: PyTorch 2.14.1, PyAV 19.0.1, Pillow 12.3.0, PyTorch-Wildlife 1.3.0, and pytest 9.1.1 (see `../../uv.lock`).
-- The opt-in real-model smoke test passed using the selected `MDV6-mit-yolov9-c` model and `config_v9c.yaml`.
+- The opt-in real-model smoke test passed using the selected `MDV6-mit-yolov9-c` model and `config_v9s.yaml`.
 - The full pytest suite passed.
 - Ruff checks and the controlled reviewed-label evaluation have not been reported as run. The upgrade plan does not yet define numeric local acceptance thresholds; set and document them before measuring animal recall and person detection. The published model-zoo metric is not a substitute for that evaluation.
 
@@ -68,7 +68,7 @@ Owner-confirmed validation on Windows/Python 3.14, after the owner synchronized 
 ### 2. Update the MegaDetector adapter
 
 - Keep the `Detector` protocol and pipeline call site stable.
-- Load `MegaDetectorV6MIT` once per ingestion run, using the explicit local `.ckpt`, `config_v9c.yaml`, and `MDV6-mit-yolov9-c` variant. Fail preflight if either file is absent or unreadable; never initialize a download-backed default implicitly.
+- Load `MegaDetectorV6MIT` once per ingestion run, using the explicit local `.ckpt`, `config_v9s.yaml`, and `MDV6-mit-yolov9-c` variant. Fail preflight if either file is absent or unreadable; never initialize a download-backed default implicitly.
 - Pass each complete decoded frame in the verified RGB representation. Configure model inference to return detections regardless of the app's animal/person thresholds, then apply the existing thresholds in the pipeline.
 - Normalize upstream output into the existing `Detection` type:
   - V6 animal, person, and vehicle classes map to the app's `ANIMAL`, `PERSON`, and `OTHER` categories.

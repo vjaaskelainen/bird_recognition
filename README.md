@@ -28,7 +28,7 @@ if (-not (Test-Path .env)) { Copy-Item .env.example .env }
 The `bird-recognition ingest` command scans local video directories recursively
 and writes animal crops with a SQLite provenance manifest. The selected detector
 is the MIT-licensed MegaDetector V6 variant `MDV6-mit-yolov9-c`. Provision its
-`.ckpt` weights and `config_v9c.yaml` locally, outside Git. Ingestion requires
+`.ckpt` weights and `config_v9s.yaml` locally, outside Git. Ingestion requires
 both local files and never downloads model weights or configuration. The Python
 3.14 Windows runtime, real-model smoke test, and full pytest suite were validated
 on 2026-10-18; locked package versions and remaining model-quality validation are
@@ -45,7 +45,7 @@ uv run bird-recognition ingest `
   --input "D:\trail-camera\videos" `
   --output "D:\trail-camera\ingested" `
   --model "D:\models\MDV6-mit-yolov9-c.ckpt" `
-  --model-config "D:\models\config_v9c.yaml"
+  --model-config "D:\models\config_v9s.yaml"
 ```
 
 The output contains `manifest.sqlite3` and retained crops. The summary separates
