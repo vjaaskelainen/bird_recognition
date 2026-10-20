@@ -35,8 +35,17 @@ dev = [
     "pytest>=9.1.1,<10",
 ]
 
+[tool.pytest.ini_options]
+markers = [
+    "real_database: requires explicit opt-in to a disposable local database",
+    "local_model: requires explicit opt-in to local model assets",
+]
+
 [tool.hatch.build.targets.wheel]
 packages = ["src/bird_recognition"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"src/bird_recognition/embed/migrations/001_initial.sql" = "bird_recognition/embed/migrations/001_initial.sql"
 
 [tool.ruff]
 line-length = 88

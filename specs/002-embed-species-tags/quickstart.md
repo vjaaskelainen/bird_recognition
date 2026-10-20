@@ -15,8 +15,10 @@ See [CLI contract](contracts/cli.md) for all options/formats and
   torch constraints and psycopg/pgvector support. Follow repository dependency
   approval/developer-sync policy; do not hand-edit `uv.lock` or downgrade Python.
 - Docker/Compose and local PostgreSQL 17 pgvector service from `compose.yaml`.
-- An idle ingestion output tree containing `manifest.sqlite3` and retained crops;
-  no need to re-ingest video. Keep footage/crops/manifests outside Git.
+- An ingestion output tree containing `manifest.sqlite3` and retained crops; keep
+  ingestion idle while the index command captures its read-only metadata snapshot.
+  The SQLite snapshot closes before crop inference begins. No video re-ingestion is
+  needed. Keep footage/crops/manifests outside Git.
 - Externally provisioned original BioCLIP assets, selected candidate JSON and,
   for quality validation, reviewed labels. No automatic asset download during
   indexing. A tiny candidate file in this guide is illustrative, not a default
