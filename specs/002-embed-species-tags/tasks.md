@@ -19,7 +19,7 @@
 
 **Purpose**: Verify feasibility and establish the planned package/test boundaries without altering ingestion.
 
-- [ ] T001 Verify released OpenCLIP/torchvision, psycopg 3 and pgvector compatibility with Python >=3.14 and existing torch constraints; record exact versions and reproducible compatibility evidence in specs/002-embed-species-tags/research.md, then declare approved dependencies only in pyproject.toml; wait for developer sync and verify local imports before feature code, or stop with evidence of the blocker.
+- [x] T001 Verify released OpenCLIP/torchvision, psycopg 3 and pgvector compatibility with Python >=3.14 and existing torch constraints; record exact versions and reproducible compatibility evidence in specs/002-embed-species-tags/research.md, then declare approved dependencies only in pyproject.toml; wait for developer sync and verify local imports before feature code, or stop with evidence of the blocker.
 - [ ] T002 Create lightweight src/bird_recognition/embed/__init__.py and tests/embed/__init__.py, and configure pytest markers for opt-in real-database/local-model tests in pyproject.toml without introducing eager model/database imports.
 - [ ] T003 Configure packaged SQL-resource inclusion in pyproject.toml and add an installed-wheel resource test in tests/test_package.py for src/bird_recognition/embed/migrations/001_initial.sql; validate the resource after T014 creates it, using approved external build artifacts rather than installing or syncing dependencies automatically.
 

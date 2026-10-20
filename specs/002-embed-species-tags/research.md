@@ -59,6 +59,24 @@ installed or resolved during planning. Respect repository policy: declaration
 edits only in `pyproject.toml`, developer syncs the environment/lock. If incompatible,
 stop and report evidence rather than downgrade Python or swap model/storage.
 
+**Post-sync compatibility evidence (2026-10-20)**: On Windows with Python 3.14.2,
+the developer-synced `uv.lock` resolved and `.venv` successfully imported these
+versions: torch 2.14.1+cpu, torchvision 0.29.1+cpu, `open-clip-torch` 3.3.0,
+`psycopg[binary]` 3.3.6 (binary backend), and pgvector 0.5.1. Reproduce the version
+and import check from the repository root with:
+
+```powershell
+.\.venv\Scripts\uv.exe run python -c "import importlib.metadata as m, platform, open_clip, psycopg, torch, torchvision; import pgvector; print(platform.python_version(), torch.__version__, torchvision.__version__, m.version('open-clip-torch'), psycopg.__version__, psycopg.pq.__impl__, m.version('pgvector'))"
+```
+
+An additional local API smoke check constructed `ViT-B-16` with
+`pretrained=None`, obtained the packaged tokenizer (one prompt produced shape
+`(1, 77)`), and round-tripped a `pgvector.Vector` through text serialization. This
+used random initialization only to exercise model-construction compatibility; it
+did not load BioCLIP assets, access the network/database, or provide model-quality
+evidence. A real PostgreSQL vector roundtrip and strict local checkpoint loading
+remain separate acceptance checks (T013/T018/T035).
+
 ## 2. Candidate file, prompting, and scoring
 
 **Decision**: UTF-8 JSON with `schema_version: 1` and nonempty `species` array of
