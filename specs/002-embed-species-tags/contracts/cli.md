@@ -1,6 +1,6 @@
 # CLI Contract: Species Indexing, Inspection, and Evaluation
 
-**Status**: `database-init`, `index`, and `inspect` are implemented for US1; `evaluate-species` remains planned.
+**Status**: `database-init`, `index`, `inspect`, and `evaluate-species` are implemented; opt-in real PostgreSQL acceptance remains pending.
 Existing `ingest` and `extract-frame` behavior stays unchanged.
 
 ## Invocation and common behavior
@@ -186,7 +186,9 @@ or `schema_version`, `run`, `items` for one selected run.
 
 Options: required `--run-id UUID`, `--labels PATH`, `--output PATH` and database
 configuration; optional `--json` for stdout. Always write the versioned JSON report
-to the explicit external output path. Refuse overwriting an existing file and
+to the explicit external output path. With `--json`, stdout is a versioned envelope
+containing `status: evaluated`, the saved output path, and the report; otherwise
+stdout is a concise human summary. Refuse overwriting an existing file and
 reject destinations inside any Git repository. Validate all input/output paths
 before writing; use an atomic temporary-file replacement for the final report.
 

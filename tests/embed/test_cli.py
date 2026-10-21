@@ -21,7 +21,12 @@ def test_cli_parser_exposes_story_one_commands_and_exact_selection_options() -> 
         if getattr(action, "dest", None) == "command"
     )
 
-    assert set(actions.choices) >= {"database-init", "index", "inspect"}
+    assert set(actions.choices) >= {
+        "database-init",
+        "index",
+        "inspect",
+        "evaluate-species",
+    }
     with pytest.raises(SystemExit) as usage_error:
         parser.parse_args(["inspect"])
     assert usage_error.value.code == 2
@@ -229,6 +234,8 @@ def test_cli_database_init_emits_versioned_json(
         (RunStatus.COMPLETE, 0),
         (RunStatus.NO_INPUT, 0),
         (RunStatus.PARTIAL_FAILURE, 1),
+        (RunStatus.FAILED, 1),
+        (RunStatus.INTERRUPTED, 1),
     ],
 )
 def test_cli_index_emits_required_summary_keys_without_assets(
@@ -522,3 +529,194 @@ def test_cli_inspect_warns_when_persisted_candidate_set_has_one_species(
     payload = json.loads(capsys.readouterr().out)
     assert result == 0
     assert any("single candidate" in warning for warning in payload["run"]["warnings"])
+
+
+def test_cli_evaluate_species_writes_read_only_low_quality_report_without_assets(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], tmp_path: Path
+) -> None:
+    from bird_recognition.embed import storage
+
+    run_id = UUID("00000000-0000-0000-0000-000000000001")
+
+    class ReadOnlyStore:
+        def __init__(self, database_url: str) -> None:
+            assert database_url == "postgresql://bird@localhost/bird_db"
+
+        def preflight(self, *, read_only: bool = False) -> None:
+            assert read_only
+
+        def inspect_run(
+            self, selected_run_id: UUID, crop_id: str | None = None
+        ) -> tuple[dict[str, object], list[dict[str, object]]]:
+            assert selected_run_id == run_id
+            assert crop_id is None
+            return (
+                {
+                    "run_id": str(run_id),
+                    "status": "complete",
+                    "counts": {"selected": 1},
+                    "model_fingerprint": "1" * 64,
+                    "candidate_set_fingerprint": "2" * 64,
+                    "scoring_fingerprint": "3" * 64,
+                    "config_fingerprint": "4" * 64,
+                    "threshold": 0.5,
+                    "candidates": {
+                        "schema_version": 1,
+                        "species": [{"id": "bird", "name": "Bird"}],
+                    },
+                },
+                [
+                    {
+                        "crop_id": "crop-1",
+                        "status": "completed",
+                        "lighting": "unknown",
+                        "decision": {
+                            "assigned_species_id": "unknown",
+                            "reason": "below_threshold",
+                        },
+                        "provenance": None,
+                    }
+                ],
+            )
+
+        def close(self) -> None:
+            return None
+
+    monkeypatch.setattr(storage, "PgVectorStore", ReadOnlyStore)
+    labels = tmp_path / "labels.json"
+    labels.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "run_id": str(run_id),
+                "examples": [
+                    {
+                        "crop_id": "crop-1",
+                        "expected_species_id": "bird",
+                        "truth_kind": "species",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    report_path = tmp_path / "report.json"
+
+    result = main(
+        [
+            "evaluate-species",
+            "--run-id",
+            str(run_id),
+            "--labels",
+            str(labels),
+            "--output",
+            str(report_path),
+            "--database-url",
+            "postgresql://bird@localhost/bird_db",
+            "--json",
+        ]
+    )
+
+    output = capsys.readouterr()
+    payload = json.loads(output.out)
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    assert result == 0
+    assert output.err == ""
+    assert payload["status"] == "evaluated"
+    assert payload["output"] == str(report_path.resolve())
+    assert report["publication_ready"] is False
+    assert report["groups"]["unknown"]["unknown_count"] == 1
+
+
+def test_cli_evaluate_species_requires_explicit_run_labels_and_output() -> None:
+    parser = _build_parser()
+
+    with pytest.raises(SystemExit) as missing_arguments:
+        parser.parse_args(["evaluate-species"])
+
+    assert missing_arguments.value.code == 2
+
+
+def test_cli_evaluate_species_rejects_repository_report_path_before_database_access(
+    capsys: pytest.CaptureFixture[str], tmp_path: Path
+) -> None:
+    labels = tmp_path / "labels.json"
+    labels.write_text(
+        '{"schema_version":1,"run_id":"00000000-0000-0000-0000-000000000001","examples":[]}',
+        encoding="utf-8",
+    )
+    output_path = Path(__file__).resolve().parents[2] / ".evaluation-private-test.json"
+
+    result = main(
+        [
+            "evaluate-species",
+            "--run-id",
+            "00000000-0000-0000-0000-000000000001",
+            "--labels",
+            str(labels),
+            "--output",
+            str(output_path),
+            "--database-url",
+            "postgresql://bird@localhost/bird_db",
+            "--json",
+        ]
+    )
+
+    payload = json.loads(capsys.readouterr().out)
+    assert result == 2
+    assert payload["status"] == "preflight_failure"
+    assert not output_path.exists()
+
+
+def test_cli_evaluate_species_database_read_failure_is_operational(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+) -> None:
+    from bird_recognition.embed import storage
+    from bird_recognition.embed.models import StorageError
+
+    class BrokenReadStore:
+        def __init__(self, database_url: str) -> None:
+            del database_url
+
+        def preflight(self, *, read_only: bool = False) -> None:
+            assert read_only
+
+        def inspect_run(
+            self, run_id: UUID, crop_id: str | None = None
+        ) -> tuple[dict[str, object], list[dict[str, object]]]:
+            del run_id, crop_id
+            raise StorageError("persisted run read failed")
+
+        def close(self) -> None:
+            return None
+
+    monkeypatch.setattr(storage, "PgVectorStore", BrokenReadStore)
+    run_id = "00000000-0000-0000-0000-000000000001"
+    labels = tmp_path / "labels.json"
+    labels.write_text(
+        json.dumps({"schema_version": 1, "run_id": run_id, "examples": []}),
+        encoding="utf-8",
+    )
+    output_path = tmp_path / "report.json"
+
+    result = main(
+        [
+            "evaluate-species",
+            "--run-id",
+            run_id,
+            "--labels",
+            str(labels),
+            "--output",
+            str(output_path),
+            "--database-url",
+            "postgresql://bird@localhost/bird_db",
+            "--json",
+        ]
+    )
+
+    payload = json.loads(capsys.readouterr().out)
+    assert result == 1
+    assert payload["status"] == "operational_failure"
+    assert not output_path.exists()

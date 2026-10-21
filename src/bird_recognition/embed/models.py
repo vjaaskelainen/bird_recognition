@@ -400,6 +400,7 @@ class RunItem:
     failure_reason: str | None
     started_at: datetime
     completed_at: datetime | None
+    lighting: Lighting
 
     def __post_init__(self) -> None:
         _validate_sha256("expected_provenance_sha256", self.expected_provenance_sha256)
@@ -407,6 +408,10 @@ class RunItem:
             _validate_sha256("expected_snapshot_id", self.expected_snapshot_id)
         if not self.crop_id:
             raise EmbedValidationError("run item crop ID is required")
+        if not isinstance(self.lighting, Lighting):
+            raise EmbedValidationError(
+                "run item lighting must be copied from the snapshot"
+            )
         has_decision = self.decision_id is not None
         has_failure = self.failure_code is not None and self.failure_reason is not None
         if self.status in (RunItemStatus.COMPLETED, RunItemStatus.SKIPPED):
@@ -453,6 +458,9 @@ class StoreProtocol(Protocol):
 
     def acquire_writer_lock(self) -> None:
         """Acquire the nonblocking database-wide indexing lock."""
+
+    def recover_stale_runs(self) -> None:
+        """Mark earlier running batches interrupted while holding the writer lock."""
 
     def release_writer_lock(self) -> None:
         """Release the indexing lock when held by this store session."""

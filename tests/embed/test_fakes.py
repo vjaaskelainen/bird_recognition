@@ -112,6 +112,7 @@ def _create_crop_result(
         failure_reason=None,
         started_at=now,
         completed_at=now,
+        lighting=snapshot.lighting,
     )
     return snapshot, representation, decision, item
 
@@ -181,6 +182,7 @@ def test_fake_store_rolls_back_insert_failures_and_survives_restart(
         failure_reason=None,
         started_at=now,
         completed_at=None,
+        lighting=snapshot.lighting,
     )
     state = FakeStoreState()
 
@@ -243,6 +245,7 @@ def test_fake_store_reconciles_lost_commit_acknowledgement_after_restart(
         failure_reason=None,
         started_at=now,
         completed_at=None,
+        lighting=snapshot.lighting,
     )
     state = FakeStoreState()
 

@@ -130,6 +130,7 @@ def index_crops(
         raise PreflightError(str(error)) from None
     run_result: ProcessingRun | None = None
     try:
+        store.recover_stale_runs()
         run_result = _run_index(
             tuple(snapshots),
             crop_root=Path(crop_root),
@@ -212,6 +213,7 @@ def _run_index(
             failure_reason=None,
             started_at=now,
             completed_at=None,
+            lighting=snapshot.lighting,
         )
         for snapshot in ordered_snapshots
     )
@@ -426,6 +428,7 @@ def _run_index(
                 failure_reason=None,
                 started_at=pending_item.started_at,
                 completed_at=processed_at,
+                lighting=snapshot.lighting,
             )
             try:
                 committed = store.commit_crop_result(
@@ -507,6 +510,7 @@ def _failed_item(item: RunItem, failure: RunFailure) -> RunItem:
         failure_reason=failure.reason,
         started_at=item.started_at,
         completed_at=datetime.now(UTC),
+        lighting=item.lighting,
     )
 
 

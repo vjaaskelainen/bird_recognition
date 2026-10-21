@@ -7,6 +7,7 @@ from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 
+import pytest
 from PIL import Image
 
 from bird_recognition.embed.config import load_species_candidates
@@ -14,7 +15,11 @@ from bird_recognition.embed.models import (
     EmbeddingModelRecord,
     IngestedCropSnapshot,
     Lighting,
+    RunItemStatus,
     RunStatus,
+    SharedModelError,
+    StorageError,
+    UnconfirmedCommitError,
 )
 from bird_recognition.embed.pipeline import index_crops
 from tests.embed.fakes import FakeModel, FakeStore, FakeStoreState
@@ -261,3 +266,271 @@ def test_changed_provenance_invalidates_vector_and_decision_reuse(
     assert changed_model.text_calls == 1
     assert len(state.representations) == 2
     assert len(state.decisions) == 2
+
+
+def test_unchanged_retry_skips_all_completed_crops_without_inference(
+    tmp_path: Path, model_record: EmbeddingModelRecord
+) -> None:
+    root = tmp_path / "crops"
+    root.mkdir()
+    snapshots = []
+    for index in range(100):
+        image_path = root / f"crop-{index:03}.png"
+        Image.new("RGB", (32, 24), (40, 120, 210)).save(image_path)
+        snapshots.append(_snapshot(f"crop-{index:03}", image_path))
+    candidates = load_species_candidates(
+        _candidate_file(tmp_path / "species.json", [{"id": "bird", "name": "Bird"}])
+    )
+    state = FakeStoreState()
+    store = FakeStore(state)
+    first_model = FakeModel(model_record)
+    first = index_crops(
+        snapshots,
+        crop_root=root,
+        manifest_locator=tmp_path / "manifest.sqlite3",
+        candidates=candidates,
+        model=first_model,
+        store=store,
+    )
+    retry_model = FakeModel(model_record)
+    retry = index_crops(
+        snapshots,
+        crop_root=root,
+        manifest_locator=tmp_path / "manifest.sqlite3",
+        candidates=candidates,
+        model=retry_model,
+        store=FakeStore(state),
+    )
+
+    assert first.completed_count == 100
+    assert retry.skipped_count == 100
+    assert retry.completed_count == retry.failed_count == 0
+    assert retry_model.inference_count == 0
+    assert len(state.decisions) == len(state.representations) == 100
+
+
+def test_newly_unreadable_completed_crop_fails_instead_of_skipping(
+    tmp_path: Path, model_record: EmbeddingModelRecord
+) -> None:
+    root = tmp_path / "crops"
+    root.mkdir()
+    image_path = root / "crop.png"
+    Image.new("RGB", (32, 24), (40, 120, 210)).save(image_path)
+    snapshot = _snapshot("crop-1", image_path)
+    candidates = [{"id": "bird", "name": "Bird"}]
+    state = FakeStoreState()
+    _index(snapshot, root, candidates, FakeModel(model_record), FakeStore(state))
+    image_path.unlink()
+
+    retry = _index(
+        snapshot, root, candidates, FakeModel(model_record), FakeStore(state)
+    )
+
+    assert retry.status is RunStatus.FAILED
+    assert retry.failed_count == 1
+    assert retry.skipped_count == 0
+    assert state.items[(retry.run_id, snapshot.crop_id)].status is RunItemStatus.FAILED
+
+
+def test_interrupted_run_recovers_stale_status_and_retries_pending_items(
+    tmp_path: Path, model_record: EmbeddingModelRecord
+) -> None:
+    root = tmp_path / "crops"
+    root.mkdir()
+    snapshots = []
+    for index in range(3):
+        image_path = root / f"crop-{index}.png"
+        Image.new("RGB", (32, 24), (40, 120, 210)).save(image_path)
+        snapshots.append(_snapshot(f"crop-{index}", image_path))
+    candidates = load_species_candidates(
+        _candidate_file(tmp_path / "species.json", [{"id": "bird", "name": "Bird"}])
+    )
+    state = FakeStoreState()
+    commits = 0
+
+    def interrupt_after_first_commit(stage: str) -> None:
+        nonlocal commits
+        if stage == "after_crop_commit":
+            commits += 1
+            if commits == 1:
+                raise InterruptedError
+
+    first_store = FakeStore(state, interrupt_after_first_commit)
+    with pytest.raises(InterruptedError):
+        index_crops(
+            snapshots,
+            crop_root=root,
+            manifest_locator=tmp_path / "manifest.sqlite3",
+            candidates=candidates,
+            model=FakeModel(model_record),
+            store=first_store,
+        )
+    abandoned_run_id = next(iter(state.runs))
+
+    retry_model = FakeModel(model_record)
+    retry = index_crops(
+        snapshots,
+        crop_root=root,
+        manifest_locator=tmp_path / "manifest.sqlite3",
+        candidates=candidates,
+        model=retry_model,
+        store=FakeStore(state),
+    )
+
+    assert state.runs[abandoned_run_id].status is RunStatus.INTERRUPTED
+    assert state.runs[abandoned_run_id].completed_count == 1
+    assert retry.status is RunStatus.COMPLETE
+    assert retry.completed_count == 2
+    assert retry.skipped_count == 1
+    assert retry_model.image_calls == 2
+    assert retry_model.text_calls == 1
+    assert len(state.decisions) == 3
+
+
+def test_lost_commit_acknowledgement_is_not_counted_and_retry_reconciles(
+    tmp_path: Path, model_record: EmbeddingModelRecord
+) -> None:
+    root = tmp_path / "crops"
+    root.mkdir()
+    image_path = root / "crop.png"
+    Image.new("RGB", (32, 24), (40, 120, 210)).save(image_path)
+    snapshot = _snapshot("crop-1", image_path)
+    candidates = [{"id": "bird", "name": "Bird"}]
+    state = FakeStoreState()
+
+    def lose_acknowledgement(stage: str) -> None:
+        if stage == "after_crop_commit":
+            raise UnconfirmedCommitError("connection lost after commit")
+
+    uncertain = _index(
+        snapshot,
+        root,
+        candidates,
+        FakeModel(model_record),
+        FakeStore(state, lose_acknowledgement),
+    )
+    retry_model = FakeModel(model_record)
+    retry = _index(snapshot, root, candidates, retry_model, FakeStore(state))
+
+    assert uncertain.completed_count == 0
+    assert uncertain.unconfirmed_crop_ids == (snapshot.crop_id,)
+    assert not uncertain.durable_status_confirmed
+    assert retry.skipped_count == 1
+    assert retry_model.inference_count == 0
+    assert len(state.decisions) == 1
+
+
+def test_shared_model_failure_stops_batch_and_leaves_pending_remainder(
+    tmp_path: Path, model_record: EmbeddingModelRecord
+) -> None:
+    root = tmp_path / "crops"
+    root.mkdir()
+    snapshots = []
+    for index in range(3):
+        image_path = root / f"crop-{index}.png"
+        Image.new("RGB", (32, 24), (40, 120, 210)).save(image_path)
+        snapshots.append(_snapshot(f"crop-{index}", image_path))
+    candidates = load_species_candidates(
+        _candidate_file(tmp_path / "species.json", [{"id": "bird", "name": "Bird"}])
+    )
+    state = FakeStoreState()
+
+    run = index_crops(
+        snapshots,
+        crop_root=root,
+        manifest_locator=tmp_path / "manifest.sqlite3",
+        candidates=candidates,
+        model=FakeModel(model_record, text_results=(SharedModelError("broken model"),)),
+        store=FakeStore(state),
+    )
+
+    assert run.status is RunStatus.FAILED
+    assert run.pending_count == 3
+    assert run.failed_count == run.completed_count == 0
+    assert all(
+        state.items[(run.run_id, snapshot.crop_id)].status is RunItemStatus.PENDING
+        for snapshot in snapshots
+    )
+
+
+def test_retag_write_rollback_preserves_previously_committed_representation(
+    tmp_path: Path, model_record: EmbeddingModelRecord
+) -> None:
+    root = tmp_path / "crops"
+    root.mkdir()
+    image_path = root / "crop.png"
+    Image.new("RGB", (32, 24), (40, 120, 210)).save(image_path)
+    snapshot = _snapshot("crop-1", image_path)
+    candidates = [
+        {"id": "bird-a", "name": "Bird A"},
+        {"id": "bird-b", "name": "Bird B"},
+    ]
+    state = FakeStoreState()
+    first = _index(
+        snapshot, root, candidates, FakeModel(model_record), FakeStore(state)
+    )
+    original_representation = next(iter(state.representations.values()))
+
+    def fail_retag(stage: str) -> None:
+        if stage == "after_decision_insert":
+            raise StorageError("write failed")
+
+    failed = _index(
+        snapshot,
+        root,
+        candidates,
+        FakeModel(model_record),
+        FakeStore(state, fail_retag),
+        threshold=0.99,
+    )
+
+    assert first.status is RunStatus.COMPLETE
+    assert not failed.durable_status_confirmed
+    assert state.representations == {
+        original_representation.representation_id: original_representation
+    }
+    assert len(state.decisions) == 1
+
+
+def test_storage_failure_stops_after_confirmed_commits_and_leaves_pending_items(
+    tmp_path: Path, model_record: EmbeddingModelRecord
+) -> None:
+    root = tmp_path / "crops"
+    root.mkdir()
+    snapshots = []
+    for index in range(3):
+        image_path = root / f"crop-{index}.png"
+        Image.new("RGB", (32, 24), (40, 120, 210)).save(image_path)
+        snapshots.append(_snapshot(f"crop-{index}", image_path))
+    candidates = load_species_candidates(
+        _candidate_file(tmp_path / "species.json", [{"id": "bird", "name": "Bird"}])
+    )
+    state = FakeStoreState()
+    commit_attempts = 0
+
+    def fail_second_commit(stage: str) -> None:
+        nonlocal commit_attempts
+        if stage == "before_crop_commit":
+            commit_attempts += 1
+            if commit_attempts == 2:
+                raise StorageError("simulated storage loss")
+
+    run = index_crops(
+        snapshots,
+        crop_root=root,
+        manifest_locator=tmp_path / "manifest.sqlite3",
+        candidates=candidates,
+        model=FakeModel(model_record),
+        store=FakeStore(state, fail_second_commit),
+    )
+
+    persisted_items = [
+        state.items[(run.run_id, snapshot.crop_id)] for snapshot in snapshots
+    ]
+    assert run.status is RunStatus.FAILED
+    assert not run.durable_status_confirmed
+    assert run.completed_count == 1
+    assert run.pending_count == 2
+    assert sum(item.status is RunItemStatus.COMPLETED for item in persisted_items) == 1
+    assert sum(item.status is RunItemStatus.PENDING for item in persisted_items) == 2
+    assert len(state.decisions) == len(state.representations) == 1

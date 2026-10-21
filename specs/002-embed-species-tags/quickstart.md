@@ -1,7 +1,8 @@
 # Quickstart: Validate Crop Embeddings and Species Tags
 
-**Status**: US1 commands and offline contracts are implemented. Real PostgreSQL,
-installed-wheel, provisioned-model, and US2/US3 acceptance gates remain pending.
+**Status**: US1–US3 commands and offline correctness contracts are implemented.
+Real PostgreSQL, installed-wheel, provisioned-model, and biological-quality
+acceptance gates remain pending; skipped boundary tests are not proof.
 
 Run all commands from `C:\code\bird_recognition` in PowerShell 5.1. Use the
 existing `.venv`; if absent, stop and ask the developer. Do not activate it.

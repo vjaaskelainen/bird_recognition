@@ -194,6 +194,7 @@ CREATE TABLE bird_embed.run_item (
     failure_reason text,
     started_at timestamptz NOT NULL,
     completed_at timestamptz,
+    lighting text NOT NULL CHECK (lighting IN ('day', 'night', 'unknown')),
     CHECK (
         (status IN ('completed', 'skipped') AND decision_id IS NOT NULL
          AND failure_code IS NULL AND failure_reason IS NULL)

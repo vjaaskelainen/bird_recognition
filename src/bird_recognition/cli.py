@@ -285,6 +285,15 @@ def _build_parser() -> argparse.ArgumentParser:
     selection.add_argument("--list-runs", action="store_true")
     inspect_parser.add_argument("--crop-id")
     inspect_parser.add_argument("--json", action="store_true")
+
+    evaluation_parser = commands.add_parser(
+        "evaluate-species", help="evaluate persisted species decisions against labels"
+    )
+    evaluation_parser.add_argument("--run-id", required=True)
+    evaluation_parser.add_argument("--labels", required=True, type=Path)
+    evaluation_parser.add_argument("--output", required=True, type=Path)
+    evaluation_parser.add_argument("--database-url")
+    evaluation_parser.add_argument("--json", action="store_true")
     return parser
 
 
@@ -328,7 +337,12 @@ def main(argv: list[str] | None = None, detector: Detector | None = None) -> int
     """Run the bird-recognition command."""
     parser = _build_parser()
     arguments = parser.parse_args(argv)
-    if arguments.command in {"database-init", "index", "inspect"}:
+    if arguments.command in {
+        "database-init",
+        "index",
+        "inspect",
+        "evaluate-species",
+    }:
         if (
             arguments.command == "inspect"
             and arguments.crop_id
@@ -429,7 +443,12 @@ def _dispatch_embed_command(arguments: argparse.Namespace) -> int:
         resolve_embed_configuration,
         sanitize_error,
     )
-    from bird_recognition.embed.models import EmbedError, PreflightError, RunStatus
+    from bird_recognition.embed.models import (
+        EmbedError,
+        PreflightError,
+        RunStatus,
+        StorageError,
+    )
     from bird_recognition.embed.scoring import (
         RELATIVE_CONFIDENCE_WARNING,
         SINGLE_CANDIDATE_WARNING,
@@ -461,9 +480,43 @@ def _dispatch_embed_command(arguments: argparse.Namespace) -> int:
                 "changes_applied": result.changes_applied,
             }
             run = None
+        elif arguments.command == "evaluate-species":
+            from bird_recognition.embed.evaluation import (
+                build_evaluation_report,
+                load_label_file,
+                validate_report_destination,
+                write_evaluation_report,
+            )
+
+            run_id = UUID(arguments.run_id)
+            load_label_file(arguments.labels)
+            output_path = validate_report_destination(arguments.output)
+            with closing(PgVectorStore(arguments.database_url)) as store:
+                try:
+                    store.preflight(read_only=True)
+                except StorageError as error:
+                    raise PreflightError(str(error)) from None
+                run_data, items = store.inspect_run(run_id)
+                report = build_evaluation_report(
+                    run_data,
+                    items,
+                    arguments.labels,
+                    expected_run_id=run_id,
+                )
+                saved_path = write_evaluation_report(report, output_path)
+            payload = {
+                "schema_version": 1,
+                "status": "evaluated",
+                "output": str(saved_path),
+                "report": report,
+            }
+            run = None
         elif arguments.command == "inspect":
             store = PgVectorStore(arguments.database_url)
-            store.preflight(read_only=True)
+            try:
+                store.preflight(read_only=True)
+            except StorageError as error:
+                raise PreflightError(str(error)) from None
             if arguments.list_runs:
                 payload = {"schema_version": 1, "runs": store.list_runs()}
             else:
@@ -534,10 +587,22 @@ def _dispatch_embed_command(arguments: argparse.Namespace) -> int:
             store.close()
         if arguments.json:
             print(json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str))
+        elif arguments.command == "evaluate-species":
+            print(f"Evaluation report: {payload['output']}")
+            for lighting, metrics in payload["report"]["groups"].items():
+                precision = metrics["precision"]
+                precision_label = "unavailable" if precision is None else str(precision)
+                print(
+                    f"{lighting}: samples={metrics['sample_count']}, "
+                    f"completed={metrics['completed_count']}, "
+                    f"precision={precision_label}"
+                )
+            print(f"Publication ready: {payload['report']['publication_ready']}")
         else:
             print(json.dumps(payload, ensure_ascii=False, indent=2, default=str))
         if run is not None and (
-            run.status in {RunStatus.PARTIAL_FAILURE, RunStatus.FAILED}
+            run.status
+            in {RunStatus.PARTIAL_FAILURE, RunStatus.FAILED, RunStatus.INTERRUPTED}
             or not run.durable_status_confirmed
             or run.unconfirmed_crop_ids
         ):

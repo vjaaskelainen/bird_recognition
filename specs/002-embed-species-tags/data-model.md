@@ -156,7 +156,9 @@ provenance pairs), selected/completed/skipped/failed/assigned/unknown counts,
 failure summaries and sanitized settings JSON. Store no database URL or secrets.
 
 Run-item fields: `(run_id, crop_id)` PK, expected snapshot identity/provenance,
-resolved input locator, state, nullable decision FK, failure code/reason, timestamps.
+resolved input locator, copied `day`/`night`/`unknown` lighting, state, nullable
+decision FK, failure code/reason, timestamps. Retain lighting on pending/failed items
+that have no successfully committed crop snapshot so evaluation can still group them.
 Run items can refer to pending/failed inputs without a persisted snapshot; successful
 ones reference a decision whose representation points to the expected snapshot.
 Snapshot/config/model rows needed for inference results are persisted together

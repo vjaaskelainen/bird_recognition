@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass, field, replace
+from datetime import UTC, datetime
 from uuid import UUID
 
 from bird_recognition.embed.models import (
@@ -115,6 +116,21 @@ class FakeStore:
     def release_writer_lock(self) -> None:
         self._fail_at("release_writer_lock")
         self.state.writer_locked = False
+
+    def recover_stale_runs(self) -> None:
+        self._fail_at("recover_stale_runs")
+        if not self.state.writer_locked:
+            raise StorageError("stale runs can only be recovered by the lock owner")
+        self.state.runs = {
+            run_id: replace(
+                run,
+                status=run.status.__class__.INTERRUPTED,
+                completed_at=datetime.now(UTC),
+            )
+            if run.status.value == "running"
+            else run
+            for run_id, run in self.state.runs.items()
+        }
 
     def register_run(
         self,

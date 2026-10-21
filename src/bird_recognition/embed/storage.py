@@ -29,6 +29,7 @@ from bird_recognition.embed.models import (
     RunFailure,
     RunItem,
     RunItemStatus,
+    RunStatus,
     Sha256,
     SpeciesCandidate,
     SpeciesCandidateSet,
@@ -102,6 +103,19 @@ class PgVectorStore:
         finally:
             connection.close()
 
+    def recover_stale_runs(self) -> None:
+        """Mark earlier running batches interrupted without changing their items."""
+        connection = self._require_writer()
+        try:
+            with connection.transaction():
+                connection.execute(
+                    "UPDATE bird_embed.processing_run "
+                    "SET status='interrupted',completed_at=now() "
+                    "WHERE status='running'"
+                )
+        except Exception as error:
+            raise _storage_error(error) from None
+
     def register_run(
         self,
         run: ProcessingRun,
@@ -111,6 +125,17 @@ class PgVectorStore:
         config: TaggingConfig,
     ) -> None:
         """Persist immutable configuration and pending run items after preflight."""
+        if (
+            len(items) != run.selected_count
+            or any(
+                item.run_id != run.run_id or item.status is not RunItemStatus.PENDING
+                for item in items
+            )
+            or run.status is not RunStatus.RUNNING
+        ):
+            raise EmbedValidationError(
+                "run registration requires all selected pending items"
+            )
         if (
             run.config_fingerprint != config.config_fingerprint
             or config.model_fingerprint != model.model_fingerprint
@@ -246,6 +271,7 @@ class PgVectorStore:
             or item.crop_id != snapshot.crop_id
             or item.expected_snapshot_id != snapshot.snapshot_id
             or item.expected_provenance_sha256 != snapshot.provenance_sha256
+            or item.lighting is not snapshot.lighting
             or decision.created_run_id != item.run_id
         ):
             raise EmbedValidationError(
@@ -307,25 +333,29 @@ class PgVectorStore:
                             "conflicting decision could not be reconciled"
                         )
                     self._skip_item_in_transaction(connection, item, existing[0])
-                    connection.execute(
+                    updated_run = connection.execute(
                         "UPDATE bird_embed.processing_run "
                         "SET skipped_count=skipped_count+1 "
-                        "WHERE run_id=%s",
+                        "WHERE run_id=%s AND status='running'",
                         (item.run_id,),
                     )
+                    if updated_run.rowcount != 1:
+                        raise StorageError("conflicting result run is not running")
                     return False
                 self._complete_item(connection, item)
-                connection.execute(
+                updated_run = connection.execute(
                     "UPDATE bird_embed.processing_run "
                     "SET completed_count=completed_count+1,"
                     "assigned_count=assigned_count+%s,unknown_count=unknown_count+%s "
-                    "WHERE run_id=%s",
+                    "WHERE run_id=%s AND status='running'",
                     (
                         int(decision.assigned_species_id is not None),
                         int(decision.assigned_species_id is None),
                         item.run_id,
                     ),
                 )
+                if updated_run.rowcount != 1:
+                    raise StorageError("crop result run is no longer running")
                 return True
         except UnconfirmedCommitError:
             raise
@@ -361,15 +391,24 @@ class PgVectorStore:
                 updated = connection.execute(
                     "UPDATE bird_embed.run_item SET status='skipped', decision_id=%s, "
                     "completed_at=%s WHERE run_id=%s AND crop_id=%s "
-                    "AND status='pending'",
-                    (item.decision_id, item.completed_at, item.run_id, item.crop_id),
+                    "AND status='pending' AND expected_snapshot_id=%s "
+                    "AND expected_provenance_sha256=%s AND lighting=%s",
+                    (
+                        item.decision_id,
+                        item.completed_at,
+                        item.run_id,
+                        item.crop_id,
+                        item.expected_snapshot_id,
+                        item.expected_provenance_sha256,
+                        item.lighting.value,
+                    ),
                 )
                 if updated.rowcount != 1:
                     raise StorageError("skipped item is not pending")
                 counter = connection.execute(
                     "UPDATE bird_embed.processing_run "
                     "SET skipped_count=skipped_count+1 "
-                    "WHERE run_id=%s",
+                    "WHERE run_id=%s AND status='running'",
                     (item.run_id,),
                 )
                 if counter.rowcount != 1:
@@ -387,20 +426,26 @@ class PgVectorStore:
                 updated = connection.execute(
                     "UPDATE bird_embed.run_item SET status='failed',failure_code=%s,"
                     "failure_reason=%s,completed_at=%s WHERE run_id=%s AND crop_id=%s "
-                    "AND status='pending'",
+                    "AND status='pending' "
+                    "AND expected_snapshot_id IS NOT DISTINCT FROM %s "
+                    "AND expected_provenance_sha256=%s AND lighting=%s",
                     (
                         item.failure_code,
                         item.failure_reason,
                         item.completed_at,
                         item.run_id,
                         item.crop_id,
+                        item.expected_snapshot_id,
+                        item.expected_provenance_sha256,
+                        item.lighting.value,
                     ),
                 )
                 if updated.rowcount != 1:
                     raise StorageError("failed item is not pending")
                 counter = connection.execute(
                     "UPDATE bird_embed.processing_run SET failed_count=failed_count+1,"
-                    "failures_json=failures_json || %s::jsonb WHERE run_id=%s",
+                    "failures_json=failures_json || %s::jsonb "
+                    "WHERE run_id=%s AND status='running'",
                     (
                         Jsonb(
                             [
@@ -421,15 +466,47 @@ class PgVectorStore:
 
     def finalize_run(self, run: ProcessingRun) -> None:
         """Persist a confirmed final run status and aggregate counters."""
+        if run.status in {RunStatus.RUNNING, RunStatus.INTERRUPTED}:
+            raise EmbedValidationError("only a final run outcome can be persisted")
         connection = self._require_writer()
         try:
             with connection.transaction():
+                counts = connection.execute(
+                    "SELECT count(*) AS selected, "
+                    "count(*) FILTER (WHERE i.status='completed') AS completed, "
+                    "count(*) FILTER (WHERE i.status='skipped') AS skipped, "
+                    "count(*) FILTER (WHERE i.status='failed') AS failed, "
+                    "count(*) FILTER (WHERE i.status='completed' "
+                    "AND d.assigned_species_id IS NOT NULL) AS assigned, "
+                    "count(*) FILTER (WHERE i.status='completed' "
+                    "AND d.assigned_species_id IS NULL) AS unknown "
+                    "FROM bird_embed.run_item AS i "
+                    "LEFT JOIN bird_embed.species_decision AS d "
+                    "ON d.decision_id=i.decision_id WHERE i.run_id=%s",
+                    (run.run_id,),
+                ).fetchone()
+                expected_counts = (
+                    run.selected_count,
+                    run.completed_count,
+                    run.skipped_count,
+                    run.failed_count,
+                    run.assigned_count,
+                    run.unknown_count,
+                )
+                persisted_counts = tuple(counts)
+                if persisted_counts != expected_counts:
+                    raise StorageError("run counters do not match durable item states")
+                pending_count = run.selected_count - sum(persisted_counts[1:4])
+                if pending_count and run.status is not RunStatus.FAILED:
+                    raise StorageError(
+                        "only fatal failed runs may retain pending items"
+                    )
                 result = connection.execute(
                     "UPDATE bird_embed.processing_run SET completed_at=%s,status=%s,"
                     "selected_count=%s,completed_count=%s,skipped_count=%s,"
                     "failed_count=%s,assigned_count=%s,unknown_count=%s,"
                     "failures_json=%s "
-                    "WHERE run_id=%s",
+                    "WHERE run_id=%s AND status='running'",
                     (
                         run.completed_at,
                         run.status.value,
@@ -444,7 +521,7 @@ class PgVectorStore:
                     ),
                 )
                 if result.rowcount != 1:
-                    raise StorageError("run to finalize does not exist")
+                    raise StorageError("run is missing or no longer running")
         except Exception as error:
             raise _storage_error(error) from None
 
@@ -499,7 +576,7 @@ class PgVectorStore:
                     "s.detection_confidence,s.detection_box_normalized,s.crop_box_pixels,"
                     "s.frame_width,s.frame_height,s.crop_original_image_path,"
                     "s.capture_time,s.capture_timezone,s.source_capture_start,"
-                    "s.source_capture_timezone,s.lighting "
+                    "s.source_capture_timezone,s.lighting AS snapshot_lighting "
                     "FROM bird_embed.run_item AS i "
                     "LEFT JOIN bird_embed.species_decision AS d "
                     "ON d.decision_id=i.decision_id "
@@ -822,7 +899,8 @@ class PgVectorStore:
             "INSERT INTO bird_embed.run_item "
             "(run_id,crop_id,expected_snapshot_id,expected_provenance_sha256,"
             "resolved_input_locator,status,decision_id,failure_code,failure_reason,"
-            "started_at,completed_at) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+            "started_at,completed_at,lighting) "
+            "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
             (
                 item.run_id,
                 item.crop_id,
@@ -835,6 +913,7 @@ class PgVectorStore:
                 item.failure_reason,
                 item.started_at,
                 item.completed_at,
+                item.lighting.value,
             ),
         )
 
@@ -842,8 +921,18 @@ class PgVectorStore:
     def _complete_item(connection: psycopg.Connection[Any], item: RunItem) -> None:
         result = connection.execute(
             "UPDATE bird_embed.run_item SET status='completed',decision_id=%s,"
-            "completed_at=%s WHERE run_id=%s AND crop_id=%s AND status='pending'",
-            (item.decision_id, item.completed_at, item.run_id, item.crop_id),
+            "completed_at=%s WHERE run_id=%s AND crop_id=%s AND status='pending' "
+            "AND expected_snapshot_id=%s AND expected_provenance_sha256=%s "
+            "AND lighting=%s",
+            (
+                item.decision_id,
+                item.completed_at,
+                item.run_id,
+                item.crop_id,
+                item.expected_snapshot_id,
+                item.expected_provenance_sha256,
+                item.lighting.value,
+            ),
         )
         if result.rowcount != 1:
             raise StorageError("crop result item is not pending")
@@ -854,8 +943,18 @@ class PgVectorStore:
     ) -> None:
         result = connection.execute(
             "UPDATE bird_embed.run_item SET status='skipped',decision_id=%s,"
-            "completed_at=%s WHERE run_id=%s AND crop_id=%s AND status='pending'",
-            (decision_id, item.completed_at, item.run_id, item.crop_id),
+            "completed_at=%s WHERE run_id=%s AND crop_id=%s AND status='pending' "
+            "AND expected_snapshot_id=%s AND expected_provenance_sha256=%s "
+            "AND lighting=%s",
+            (
+                decision_id,
+                item.completed_at,
+                item.run_id,
+                item.crop_id,
+                item.expected_snapshot_id,
+                item.expected_provenance_sha256,
+                item.lighting.value,
+            ),
         )
         if result.rowcount != 1:
             raise StorageError("conflicting result item is not pending")
@@ -964,6 +1063,7 @@ def _item_inspection(row: Any) -> dict[str, object]:
         "status": row["status"],
         "expected_snapshot_id": _strip_or_none(row["expected_snapshot_id"]),
         "expected_provenance_sha256": row["expected_provenance_sha256"].strip(),
+        "lighting": row["snapshot_lighting"] or row["lighting"],
         "failure_code": row["failure_code"],
         "failure_reason": row["failure_reason"],
         "decision": None,
