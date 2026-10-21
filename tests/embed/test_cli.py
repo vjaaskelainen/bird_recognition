@@ -5,7 +5,7 @@ import sys
 from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 
@@ -93,8 +93,6 @@ def test_cli_inspect_lists_runs_as_json_without_model_or_manifest(
 def test_cli_inspect_selects_run_and_crop_without_assets(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    from uuid import UUID
-
     from bird_recognition.embed import storage
 
     selected_run_id = uuid4()
@@ -319,3 +317,208 @@ def test_cli_index_emits_required_summary_keys_without_assets(
         "durable_status_confirmed",
         "unconfirmed_crop_ids",
     } <= set(payload)
+
+
+def test_cli_index_resolves_process_environment_and_dotenv_values(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+) -> None:
+    from bird_recognition.embed import pipeline, storage
+
+    manifest = tmp_path / "manifest.sqlite3"
+    manifest.touch()
+    monkeypatch.setattr("bird_recognition.cli.find_dotenv", lambda usecwd: "local.env")
+    monkeypatch.setattr(
+        "bird_recognition.cli.dotenv_values",
+        lambda path: {
+            "BIRD_RECOGNITION_DATABASE_URL": "postgresql://dotenv@localhost/dotenv_db",
+            "BIRD_RECOGNITION_BIOCLIP_MODEL_DIR": "dotenv-model",
+            "BIRD_RECOGNITION_SPECIES_LIST": "dotenv-species.json",
+            "BIRD_RECOGNITION_SPECIES_THRESHOLD": "0.25",
+        },
+    )
+    monkeypatch.setenv(
+        "BIRD_RECOGNITION_DATABASE_URL", "postgresql://bird@localhost/bird_db"
+    )
+    monkeypatch.setenv(
+        "BIRD_RECOGNITION_BIOCLIP_MODEL_DIR", str(tmp_path / "env-model")
+    )
+    monkeypatch.setenv(
+        "BIRD_RECOGNITION_SPECIES_LIST", str(tmp_path / "env-species.json")
+    )
+    monkeypatch.setenv("BIRD_RECOGNITION_SPECIES_THRESHOLD", "0.75")
+    captured: list[tuple[tuple[object, ...], dict[str, object]]] = []
+
+    class Store:
+        def __init__(self, database_url: str) -> None:
+            assert database_url == "postgresql://bird@localhost/bird_db"
+
+        def get_run_configuration(self, run_id: object) -> dict[str, object]:
+            return {}
+
+        def close(self) -> None:
+            return None
+
+    run = SimpleNamespace(
+        run_id=uuid4(),
+        status=RunStatus.COMPLETE,
+        config_fingerprint="4" * 64,
+        selected_count=0,
+        completed_count=0,
+        skipped_count=0,
+        failed_count=0,
+        assigned_count=0,
+        unknown_count=0,
+        pending_count=0,
+        failures=(),
+        model_fingerprint="1" * 64,
+        candidate_set_fingerprint="2" * 64,
+        scoring_fingerprint="3" * 64,
+        threshold=0.75,
+        candidate_count=2,
+        durable_status_confirmed=True,
+        unconfirmed_crop_ids=(),
+    )
+
+    def fake_index_manifest(*args: object, **kwargs: object) -> SimpleNamespace:
+        captured.append((args, kwargs))
+        return run
+
+    monkeypatch.setattr(storage, "PgVectorStore", Store)
+    monkeypatch.setattr(pipeline, "index_manifest", fake_index_manifest)
+
+    result = main(["index", "--manifest", str(manifest), "--json"])
+
+    output = capsys.readouterr()
+    assert result == 0
+    assert json.loads(output.out)["threshold"] == 0.75
+    assert captured[0][1]["model_directory"] == tmp_path / "env-model"
+    assert captured[0][1]["species_path"] == tmp_path / "env-species.json"
+    assert captured[0][1]["threshold"] == 0.75
+
+
+def test_cli_inspect_includes_full_relative_confidence_warning(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from bird_recognition.embed import storage
+
+    class ReadOnlyStore:
+        def __init__(self, database_url: str) -> None:
+            del database_url
+
+        def preflight(self, *, read_only: bool = False) -> None:
+            assert read_only
+
+        def inspect_run(
+            self, run_id: UUID, crop_id: str | None = None
+        ) -> tuple[dict[str, object], list[dict[str, object]]]:
+            del run_id, crop_id
+            return (
+                {
+                    "candidate_set_fingerprint": "2" * 64,
+                    "candidates": {
+                        "species": [
+                            {"id": "Exact-ID", "name": "Species One"},
+                            {"id": "second", "name": "Species Two"},
+                        ]
+                    },
+                    "config_fingerprint": "4" * 64,
+                    "model_fingerprint": "1" * 64,
+                    "scoring_fingerprint": "3" * 64,
+                    "threshold": 0.5,
+                },
+                [
+                    {
+                        "decision": {
+                            "best_candidate_id": "Exact-ID",
+                            "candidate_scores": [
+                                {"id": "Exact-ID", "logit": 1.0, "score": 0.5},
+                                {"id": "second", "logit": 1.0, "score": 0.5},
+                            ],
+                            "tied_candidate_ids": ["Exact-ID", "second"],
+                            "warnings": ["relative warning"],
+                        }
+                    }
+                ],
+            )
+
+        def close(self) -> None:
+            return None
+
+    monkeypatch.setattr(storage, "PgVectorStore", ReadOnlyStore)
+
+    result = main(
+        [
+            "inspect",
+            "--database-url",
+            "postgresql://bird@localhost/bird_db",
+            "--run-id",
+            str(uuid4()),
+            "--json",
+        ]
+    )
+
+    payload = json.loads(capsys.readouterr().out)
+    assert result == 0
+    assert payload["run"]["threshold"] == 0.5
+    assert payload["run"]["config_fingerprint"] == "4" * 64
+    assert payload["run"]["model_fingerprint"] == "1" * 64
+    assert payload["run"]["candidate_set_fingerprint"] == "2" * 64
+    assert payload["run"]["scoring_fingerprint"] == "3" * 64
+    assert payload["run"]["candidates"]["species"][0]["id"] == "Exact-ID"
+    assert payload["items"][0]["decision"]["tied_candidate_ids"] == [
+        "Exact-ID",
+        "second",
+    ]
+    assert [
+        score["score"] for score in payload["items"][0]["decision"]["candidate_scores"]
+    ] == [
+        0.5,
+        0.5,
+    ]
+    assert payload["items"][0]["decision"]["warnings"]
+    assert "different candidate sets are not directly comparable" in json.dumps(payload)
+    assert "Out-of-list animals can score highly" in json.dumps(payload)
+
+
+def test_cli_inspect_warns_when_persisted_candidate_set_has_one_species(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from bird_recognition.embed import storage
+
+    class ReadOnlyStore:
+        def __init__(self, database_url: str) -> None:
+            del database_url
+
+        def preflight(self, *, read_only: bool = False) -> None:
+            assert read_only
+
+        def inspect_run(
+            self, run_id: str, crop_id: str | None = None
+        ) -> tuple[dict[str, object], list[dict[str, object]]]:
+            del run_id, crop_id
+            return (
+                {"candidates": {"species": [{"id": "one", "name": "One"}]}},
+                [],
+            )
+
+        def close(self) -> None:
+            return None
+
+    monkeypatch.setattr(storage, "PgVectorStore", ReadOnlyStore)
+
+    result = main(
+        [
+            "inspect",
+            "--database-url",
+            "postgresql://bird@localhost/bird_db",
+            "--run-id",
+            str(uuid4()),
+            "--json",
+        ]
+    )
+
+    payload = json.loads(capsys.readouterr().out)
+    assert result == 0
+    assert any("single candidate" in warning for warning in payload["run"]["warnings"])

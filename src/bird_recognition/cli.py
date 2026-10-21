@@ -254,9 +254,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "database-init", help="initialize the local embedding database schema"
     )
     database_parser.add_argument(
-        "--database-url",
-        default=environment.get("BIRD_RECOGNITION_DATABASE_URL"),
-        help="local PostgreSQL connection URL",
+        "--database-url", help="local PostgreSQL connection URL"
     )
     database_parser.add_argument("--json", action="store_true")
 
@@ -265,21 +263,13 @@ def _build_parser() -> argparse.ArgumentParser:
     index_parser.add_argument("--crop-root", type=Path)
     index_parser.add_argument(
         "--species-list",
-        type=Path,
-        default=environment.get("BIRD_RECOGNITION_SPECIES_LIST") or None,
     )
     index_parser.add_argument(
         "--model-dir",
-        type=Path,
-        default=environment.get("BIRD_RECOGNITION_BIOCLIP_MODEL_DIR") or None,
     )
-    index_parser.add_argument(
-        "--threshold",
-        default=environment.get("BIRD_RECOGNITION_SPECIES_THRESHOLD") or "0.5",
-    )
+    index_parser.add_argument("--threshold")
     index_parser.add_argument(
         "--database-url",
-        default=environment.get("BIRD_RECOGNITION_DATABASE_URL"),
         help="local PostgreSQL connection URL",
     )
     index_parser.add_argument("--json", action="store_true")
@@ -288,9 +278,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "inspect", help="inspect persisted embedding runs and decisions"
     )
     inspect_parser.add_argument(
-        "--database-url",
-        default=environment.get("BIRD_RECOGNITION_DATABASE_URL"),
-        help="local PostgreSQL connection URL",
+        "--database-url", help="local PostgreSQL connection URL"
     )
     selection = inspect_parser.add_mutually_exclusive_group(required=True)
     selection.add_argument("--run-id", type=str)
@@ -438,8 +426,8 @@ def _dispatch_embed_command(arguments: argparse.Namespace) -> int:
 
     from bird_recognition.embed.config import (
         EmbedValidationError,
+        resolve_embed_configuration,
         sanitize_error,
-        validate_local_database_url,
     )
     from bird_recognition.embed.models import EmbedError, PreflightError, RunStatus
     from bird_recognition.embed.scoring import (
@@ -449,9 +437,20 @@ def _dispatch_embed_command(arguments: argparse.Namespace) -> int:
     from bird_recognition.embed.storage import PgVectorStore, initialize_database
 
     try:
-        if not arguments.database_url:
-            raise EmbedValidationError("--database-url is required")
-        validate_local_database_url(arguments.database_url)
+        dotenv_path = find_dotenv(usecwd=True)
+        dotenv_environment = dotenv_values(dotenv_path) if dotenv_path else {}
+        resolved = resolve_embed_configuration(
+            arguments.command,
+            explicit={
+                "database_url": arguments.database_url,
+                "model_dir": getattr(arguments, "model_dir", None),
+                "species_list": getattr(arguments, "species_list", None),
+                "threshold": getattr(arguments, "threshold", None),
+            },
+            process_environment=os.environ,
+            dotenv_environment=dotenv_environment,
+        )
+        arguments.database_url = resolved["database_url"]
         if arguments.command == "database-init":
             result = initialize_database(arguments.database_url)
             payload = {
@@ -471,6 +470,16 @@ def _dispatch_embed_command(arguments: argparse.Namespace) -> int:
                 run_data, items = store.inspect_run(
                     UUID(arguments.run_id), arguments.crop_id
                 )
+                species_data = run_data.get("candidates", {})
+                species = (
+                    species_data.get("species", [])
+                    if isinstance(species_data, dict)
+                    else []
+                )
+                warnings = [RELATIVE_CONFIDENCE_WARNING]
+                if len(species) == 1:
+                    warnings.append(SINGLE_CANDIDATE_WARNING)
+                run_data["warnings"] = warnings
                 payload = {"schema_version": 1, "run": run_data, "items": items}
             store.close()
             run = None
@@ -480,19 +489,15 @@ def _dispatch_embed_command(arguments: argparse.Namespace) -> int:
                 crop_root = manifest_path.parent
             else:
                 crop_root = arguments.crop_root
-            if arguments.species_list is None:
-                raise EmbedValidationError("--species-list is required")
-            if arguments.model_dir is None:
-                raise EmbedValidationError("--model-dir is required")
             from bird_recognition.embed.pipeline import index_manifest
 
             store = PgVectorStore(arguments.database_url)
             run = index_manifest(
                 arguments.manifest,
                 crop_root=crop_root,
-                species_path=arguments.species_list,
-                model_directory=arguments.model_dir,
-                threshold=arguments.threshold,
+                species_path=Path(resolved["species_list"]),
+                model_directory=Path(resolved["model_dir"]),
+                threshold=resolved["threshold"],
                 store=store,
             )
             payload = {

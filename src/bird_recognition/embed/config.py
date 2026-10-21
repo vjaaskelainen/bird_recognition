@@ -7,6 +7,7 @@ import ipaddress
 import json
 import math
 import re
+from collections.abc import Mapping
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -32,6 +33,12 @@ _HOST_MESSAGE_PATTERN = re.compile(
     r"(?i)\b((?:host(?:name|\s+name)?|server at)\s+)"
     r"(?:\"[^\"]+\"|'[^']+'|[^\s,;]+)"
 )
+_EMBED_SETTING_ENVIRONMENT = {
+    "database_url": "BIRD_RECOGNITION_DATABASE_URL",
+    "model_dir": "BIRD_RECOGNITION_BIOCLIP_MODEL_DIR",
+    "species_list": "BIRD_RECOGNITION_SPECIES_LIST",
+    "threshold": "BIRD_RECOGNITION_SPECIES_THRESHOLD",
+}
 
 
 class _DuplicateJsonKeyError(ValueError):
@@ -219,6 +226,57 @@ def validate_threshold(value: object = None) -> float:
     if not math.isfinite(threshold) or not 0 <= threshold <= 1:
         raise EmbedValidationError("threshold must be a finite number within [0, 1]")
     return 0.0 if threshold == 0 else threshold
+
+
+def resolve_embed_configuration(
+    command: str,
+    *,
+    explicit: Mapping[str, object],
+    process_environment: Mapping[str, str | None],
+    dotenv_environment: Mapping[str, str | None],
+) -> dict[str, str | float]:
+    """Resolve command settings in CLI, process, dotenv, then default order."""
+    required_by_command = {
+        "database-init": ("database_url",),
+        "index": ("database_url", "model_dir", "species_list"),
+        "inspect": ("database_url",),
+        "evaluate-species": ("database_url",),
+    }
+    if command not in required_by_command:
+        raise EmbedValidationError("unsupported embedding command")
+
+    relevant = set(required_by_command[command])
+    if command == "index":
+        relevant.add("threshold")
+    resolved: dict[str, str | float] = {}
+    for setting in _EMBED_SETTING_ENVIRONMENT:
+        if setting not in relevant:
+            continue
+        alias = _EMBED_SETTING_ENVIRONMENT[setting]
+        value = explicit.get(setting)
+        if value is None:
+            value = process_environment.get(alias)
+        if value is None:
+            value = dotenv_environment.get(alias)
+        if value is None:
+            if setting == "threshold":
+                resolved[setting] = validate_threshold()
+                continue
+            if setting in required_by_command[command]:
+                raise EmbedValidationError(f"{setting.replace('_', ' ')} is required")
+            continue
+        if setting == "threshold":
+            resolved[setting] = validate_threshold(value)
+            continue
+        if isinstance(value, Path):
+            value = str(value)
+        if not isinstance(value, str) or not value.strip():
+            raise EmbedValidationError(f"{setting.replace('_', ' ')} must not be empty")
+        normalized = value.strip()
+        if setting == "database_url":
+            validate_local_database_url(normalized)
+        resolved[setting] = normalized
+    return resolved
 
 
 def _is_local_host(host: str) -> bool:

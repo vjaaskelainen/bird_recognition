@@ -87,17 +87,62 @@ def score_embeddings(
         logits = np.asarray(text @ image * np.float64(logit_scale), dtype=np.float64)
     if logits.shape != (len(ordered),) or not np.isfinite(logits).all():
         raise EmbedValidationError("candidate logits must be finite")
-    shifted_logits = logits - np.max(logits)
-    exponentials = np.exp(shifted_logits)
-    denominator = np.sum(exponentials, dtype=np.float64)
-    scores = exponentials / denominator
-    if (
-        not np.isfinite(scores).all()
-        or np.any(scores < 0)
-        or np.any(scores > 1)
-        or not math.isclose(float(np.sum(scores)), 1.0, abs_tol=SCORE_SUM_TOLERANCE)
+    exponentials = np.exp(logits - np.max(logits))
+    scores = exponentials / np.sum(exponentials, dtype=np.float64)
+    return decision_from_score_map(
+        tuple(
+            CandidateScore(candidate.id, float(logits[index]), float(scores[index]))
+            for index, candidate in enumerate(ordered)
+        ),
+        ordered,
+        threshold=threshold,
+    )
+
+
+def decision_from_score_map(
+    scores: Sequence[CandidateScore],
+    candidates: Sequence[SpeciesCandidate],
+    *,
+    threshold: float,
+) -> ScoreResult:
+    """Validate persisted logits/scores and apply a threshold-only retag."""
+    ordered = tuple(sorted(candidates, key=lambda candidate: candidate.id))
+    if not ordered or tuple(score.id for score in scores) != tuple(
+        candidate.id for candidate in ordered
     ):
-        raise EmbedValidationError("candidate scores are invalid")
+        raise EmbedValidationError("stored score map does not match candidates")
+    if (
+        isinstance(threshold, bool)
+        or not isinstance(threshold, (int, float))
+        or not math.isfinite(threshold)
+        or not 0 <= threshold <= 1
+    ):
+        raise EmbedValidationError("threshold must be finite and within [0, 1]")
+    logits = np.asarray([score.logit for score in scores], dtype=np.float64)
+    persisted_scores = np.asarray([score.score for score in scores], dtype=np.float64)
+    if (
+        logits.shape != (len(ordered),)
+        or not np.isfinite(logits).all()
+        or not np.isfinite(persisted_scores).all()
+        or np.any(persisted_scores < 0)
+        or np.any(persisted_scores > 1)
+        or not math.isclose(float(np.sum(persisted_scores)), 1.0, abs_tol=1e-9)
+    ):
+        raise EmbedValidationError("stored score map is invalid")
+    with np.errstate(over="ignore", invalid="ignore"):
+        exponentials = np.exp(logits - np.max(logits))
+    denominator = np.sum(exponentials, dtype=np.float64)
+    normalized_scores = exponentials / denominator
+    if (
+        not np.isfinite(normalized_scores).all()
+        or np.any(normalized_scores < 0)
+        or np.any(normalized_scores > 1)
+        or not math.isclose(
+            float(np.sum(normalized_scores)), 1.0, abs_tol=SCORE_SUM_TOLERANCE
+        )
+        or not np.allclose(normalized_scores, persisted_scores, rtol=0, atol=1e-12)
+    ):
+        raise EmbedValidationError("stored scores disagree with their logits")
 
     maximum = np.max(logits)
     tied_indices = tuple(
@@ -107,7 +152,7 @@ def score_embeddings(
         CandidateScore(
             id=candidate.id,
             logit=float(logits[index]),
-            score=float(scores[index]),
+            score=float(normalized_scores[index]),
         )
         for index, candidate in enumerate(ordered)
     )

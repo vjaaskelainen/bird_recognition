@@ -480,6 +480,11 @@ class StoreProtocol(Protocol):
     ) -> CropRepresentation | None:
         """Return a persisted image vector compatible with snapshot and model."""
 
+    def get_compatible_score_map(
+        self, representation_id: UUID, scoring_fingerprint: Sha256
+    ) -> tuple[CandidateScore, ...] | None:
+        """Return a validated score map for the exact scoring identity, if any."""
+
     def commit_crop_result(
         self,
         snapshot: IngestedCropSnapshot,

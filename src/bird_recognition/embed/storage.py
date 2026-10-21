@@ -205,6 +205,32 @@ class PgVectorStore:
         except Exception as error:
             raise _storage_error(error) from None
 
+    def get_compatible_score_map(
+        self, representation_id: UUID, scoring_fingerprint: Sha256
+    ) -> tuple[CandidateScore, ...] | None:
+        """Load a saved candidate score map for the exact scoring contract."""
+        try:
+            with psycopg.connect(
+                self._database_url, row_factory=dict_row
+            ) as connection:
+                row = connection.execute(
+                    "SELECT d.candidate_scores_json "
+                    "FROM bird_embed.species_decision AS d "
+                    "JOIN bird_embed.tagging_config AS t USING(config_fingerprint) "
+                    "WHERE d.representation_id=%s AND t.scoring_fingerprint=%s "
+                    "ORDER BY d.processed_at DESC,d.decision_id DESC LIMIT 1",
+                    (representation_id, scoring_fingerprint),
+                ).fetchone()
+                if row is None:
+                    return None
+                values = row["candidate_scores_json"]
+                return tuple(
+                    CandidateScore(value["id"], value["logit"], value["score"])
+                    for value in values
+                )
+        except Exception as error:
+            raise _storage_error(error) from None
+
     def commit_crop_result(
         self,
         snapshot: IngestedCropSnapshot,
@@ -220,7 +246,6 @@ class PgVectorStore:
             or item.crop_id != snapshot.crop_id
             or item.expected_snapshot_id != snapshot.snapshot_id
             or item.expected_provenance_sha256 != snapshot.provenance_sha256
-            or representation.created_run_id != item.run_id
             or decision.created_run_id != item.run_id
         ):
             raise EmbedValidationError(

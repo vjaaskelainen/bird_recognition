@@ -40,6 +40,7 @@ from bird_recognition.embed.models import (
     UnconfirmedCommitError,
 )
 from bird_recognition.embed.scoring import (
+    decision_from_score_map,
     score_embeddings,
     validate_normalized_vector,
 )
@@ -281,11 +282,36 @@ def _run_index(
                 skipped += 1
                 continue
 
+            compatible_representation = store.get_compatible_representation(
+                snapshot.snapshot_id, model_identity.model_fingerprint
+            )
+            if compatible_representation is not None and (
+                compatible_representation.snapshot_id != snapshot.snapshot_id
+                or compatible_representation.model_fingerprint
+                != model_identity.model_fingerprint
+            ):
+                raise StorageError("stored representation identity is incompatible")
+
+            image_vector: tuple[float, ...] = ()
+            compatible_score_map = (
+                store.get_compatible_score_map(
+                    compatible_representation.representation_id,
+                    config.scoring_fingerprint,
+                )
+                if compatible_representation is not None
+                else None
+            )
             try:
-                with Image.open(crop_path) as image:
-                    image.verify()
-                with Image.open(crop_path) as image:
-                    image.load()
+                if compatible_score_map is not None:
+                    image_vector = validate_normalized_vector(
+                        compatible_representation.embedding
+                    )
+                    result = decision_from_score_map(
+                        compatible_score_map,
+                        candidates.candidates,
+                        threshold=config.threshold,
+                    )
+                else:
                     if text_vectors is None:
                         prompts = tuple(
                             config.prompt_template.format(name=item.name)
@@ -305,15 +331,24 @@ def _run_index(
                             raise SharedModelError(
                                 "BioCLIP returned an incomplete candidate vector set"
                             )
-                    image_vector = model.encode_image(image.convert("RGB"))
-                    image_vector = validate_normalized_vector(image_vector)
-                result = score_embeddings(
-                    image_vector,
-                    text_vectors,
-                    candidates.candidates,
-                    logit_scale=config.effective_logit_scale,
-                    threshold=config.threshold,
-                )
+                    if compatible_representation is not None:
+                        image_vector = validate_normalized_vector(
+                            compatible_representation.embedding
+                        )
+                    else:
+                        with Image.open(crop_path) as image:
+                            image.verify()
+                        with Image.open(crop_path) as image:
+                            image.load()
+                            image_vector = model.encode_image(image.convert("RGB"))
+                        image_vector = validate_normalized_vector(image_vector)
+                    result = score_embeddings(
+                        image_vector,
+                        text_vectors,
+                        candidates.candidates,
+                        logit_scale=config.effective_logit_scale,
+                        threshold=config.threshold,
+                    )
             except UnidentifiedImageError, OSError:
                 failure = RunFailure(
                     snapshot.crop_id,
@@ -357,7 +392,7 @@ def _run_index(
                 continue
 
             processed_at = datetime.now(UTC)
-            representation = CropRepresentation(
+            representation = compatible_representation or CropRepresentation(
                 representation_id=uuid4(),
                 snapshot_id=snapshot.snapshot_id,
                 model_fingerprint=model_identity.model_fingerprint,

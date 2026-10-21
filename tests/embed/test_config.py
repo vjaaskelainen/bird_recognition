@@ -10,6 +10,7 @@ from bird_recognition.embed.config import (
     build_tagging_config,
     canonical_json_bytes,
     load_species_candidates,
+    resolve_embed_configuration,
     sanitize_error,
     validate_local_database_url,
     validate_threshold,
@@ -297,3 +298,130 @@ def test_build_tagging_config_keeps_scoring_identity_threshold_independent(
     )
     assert json.loads(first.canonical_json)["threshold"] == 0.5
     assert json.loads(retagged.canonical_json)["threshold"] == 0.75
+
+
+def test_resolve_embed_configuration_uses_cli_environment_dotenv_then_default() -> None:
+    resolved = resolve_embed_configuration(
+        "index",
+        explicit={"database_url": "postgresql://cli@localhost/cli_db"},
+        process_environment={
+            "BIRD_RECOGNITION_DATABASE_URL": "postgresql://process@localhost/process_db",
+            "BIRD_RECOGNITION_BIOCLIP_MODEL_DIR": "process-model",
+            "BIRD_RECOGNITION_SPECIES_LIST": "process-species.json",
+        },
+        dotenv_environment={
+            "BIRD_RECOGNITION_DATABASE_URL": "postgresql://dotenv@localhost/dotenv_db",
+            "BIRD_RECOGNITION_BIOCLIP_MODEL_DIR": "dotenv-model",
+            "BIRD_RECOGNITION_SPECIES_LIST": "dotenv-species.json",
+            "BIRD_RECOGNITION_SPECIES_THRESHOLD": "0.7",
+        },
+    )
+
+    assert resolved == {
+        "database_url": "postgresql://cli@localhost/cli_db",
+        "model_dir": "process-model",
+        "species_list": "process-species.json",
+        "threshold": 0.7,
+    }
+
+
+def test_resolve_embed_configuration_uses_dotenv_default() -> None:
+    resolved = resolve_embed_configuration(
+        "index",
+        explicit={},
+        process_environment={},
+        dotenv_environment={
+            "BIRD_RECOGNITION_DATABASE_URL": "postgresql://bird@localhost/bird_db",
+            "BIRD_RECOGNITION_BIOCLIP_MODEL_DIR": "local-model",
+            "BIRD_RECOGNITION_SPECIES_LIST": "species.json",
+        },
+    )
+
+    assert resolved == {
+        "database_url": "postgresql://bird@localhost/bird_db",
+        "model_dir": "local-model",
+        "species_list": "species.json",
+        "threshold": 0.5,
+    }
+
+
+@pytest.mark.parametrize(
+    ("command", "explicit", "environment"),
+    [
+        (
+            "index",
+            {"species_list": ""},
+            {"BIRD_RECOGNITION_SPECIES_LIST": "valid.json"},
+        ),
+        (
+            "index",
+            {"threshold": "invalid"},
+            {"BIRD_RECOGNITION_SPECIES_THRESHOLD": "0.7"},
+        ),
+        ("index", {}, {"BIRD_RECOGNITION_BIOCLIP_MODEL_DIR": ""}),
+        ("database-init", {}, {"BIRD_RECOGNITION_DATABASE_URL": ""}),
+    ],
+)
+def test_resolve_embed_configuration_rejects_empty_or_invalid_selected_values(
+    command: str, explicit: dict[str, object], environment: dict[str, str]
+) -> None:
+    with pytest.raises(EmbedValidationError):
+        resolve_embed_configuration(
+            command,
+            explicit=explicit,
+            process_environment=environment,
+            dotenv_environment={},
+        )
+
+
+def test_resolve_embed_configuration_requires_only_command_relevant_settings() -> None:
+    resolved = resolve_embed_configuration(
+        "inspect",
+        explicit={},
+        process_environment={
+            "BIRD_RECOGNITION_DATABASE_URL": "postgresql://bird@localhost/bird_db",
+            "BIRD_RECOGNITION_SPECIES_LIST": "",
+            "BIRD_RECOGNITION_BIOCLIP_MODEL_DIR": "",
+        },
+        dotenv_environment={},
+    )
+
+    assert resolved == {
+        "database_url": "postgresql://bird@localhost/bird_db",
+    }
+
+
+def test_resolve_embed_configuration_ignores_unapproved_aliases() -> None:
+    with pytest.raises(EmbedValidationError):
+        resolve_embed_configuration(
+            "index",
+            explicit={},
+            process_environment={
+                "POSTGRES_DB": "bird_db",
+                "POSTGRES_USER": "bird",
+                "POSTGRES_PASSWORD": "private-password",
+                "BIRD_RECOGNITION_MANIFEST": "manifest.sqlite3",
+                "BIRD_RECOGNITION_RUN_ID": "run-1",
+                "BIRD_RECOGNITION_LABELS": "labels.json",
+                "BIRD_RECOGNITION_OUTPUT": "report.json",
+                "BIRD_RECOGNITION_TEST_DATABASE_URL": "postgresql://test@localhost/bird_test",
+            },
+            dotenv_environment={},
+        )
+
+
+def test_resolve_embed_configuration_rejects_and_redacts_remote_database_url() -> None:
+    with pytest.raises(EmbedValidationError) as error:
+        resolve_embed_configuration(
+            "inspect",
+            explicit={},
+            process_environment={
+                "BIRD_RECOGNITION_DATABASE_URL": (
+                    "postgresql://private-user:private-password@remote.example/bird_db"
+                )
+            },
+            dotenv_environment={},
+        )
+
+    assert "private-password" not in str(error.value)
+    assert "remote.example" not in str(error.value)

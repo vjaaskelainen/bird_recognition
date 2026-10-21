@@ -5,6 +5,7 @@ from dataclasses import dataclass, field, replace
 from uuid import UUID
 
 from bird_recognition.embed.models import (
+    CandidateScore,
     CropRepresentation,
     EmbeddingModelRecord,
     IngestedCropSnapshot,
@@ -204,6 +205,25 @@ class FakeStore:
             key=lambda representation: str(representation.representation_id),
             default=None,
         )
+
+    def get_compatible_score_map(
+        self, representation_id: UUID, scoring_fingerprint: Sha256
+    ) -> tuple[CandidateScore, ...] | None:
+        self._fail_at("get_compatible_score_map")
+        compatible = (
+            decision
+            for decision in self.state.decisions.values()
+            if decision.representation_id == representation_id
+            and (config := self.state.configs.get(decision.config_fingerprint))
+            is not None
+            and config.scoring_fingerprint == scoring_fingerprint
+        )
+        decision = max(
+            compatible,
+            key=lambda value: (value.processed_at, str(value.decision_id)),
+            default=None,
+        )
+        return decision.candidate_scores if decision is not None else None
 
     def commit_crop_result(
         self,

@@ -12,7 +12,11 @@ from bird_recognition.embed.models import (
     SpeciesCandidate,
     SpeciesDecision,
 )
-from bird_recognition.embed.scoring import score_embeddings, validate_decision
+from bird_recognition.embed.scoring import (
+    decision_from_score_map,
+    score_embeddings,
+    validate_decision,
+)
 
 
 @pytest.mark.parametrize("threshold", [0.5, 0.5000000001, 0.4999999999])
@@ -112,6 +116,42 @@ def test_score_embeddings_single_candidate_warns_and_assigns() -> None:
     assert result.assigned_species_id == "a"
     assert result.confidence == 1.0
     assert len(result.warnings) == 2
+
+
+def test_decision_from_score_map_reapplies_threshold_without_changing_scores() -> None:
+    candidates = (SpeciesCandidate("a", "A"), SpeciesCandidate("b", "B"))
+    original = score_embeddings(
+        (1.0, 0.0),
+        ((1.0, 0.0), (0.0, 1.0)),
+        candidates,
+        logit_scale=1.0,
+        threshold=0.5,
+    )
+
+    retagged = decision_from_score_map(original.scores, candidates, threshold=0.9)
+
+    assert retagged.reason == "below_threshold"
+    assert retagged.best_candidate_id == "a"
+    assert retagged.assigned_species_id is None
+    assert retagged.scores == original.scores
+
+
+def test_decision_from_score_map_rejects_scores_that_disagree_with_logits() -> None:
+    candidates = (SpeciesCandidate("a", "A"), SpeciesCandidate("b", "B"))
+    original = score_embeddings(
+        (1.0, 0.0),
+        ((1.0, 0.0), (0.0, 1.0)),
+        candidates,
+        logit_scale=1.0,
+        threshold=0.5,
+    )
+    invalid = (
+        replace(original.scores[0], score=0.5),
+        replace(original.scores[1], score=0.5),
+    )
+
+    with pytest.raises(EmbedValidationError):
+        decision_from_score_map(invalid, candidates, threshold=0.5)
 
 
 def test_validate_decision_rejects_nonfinite_scores_and_threshold_disagreement() -> (
