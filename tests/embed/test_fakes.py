@@ -213,6 +213,12 @@ def test_fake_store_rolls_back_insert_failures_and_survives_restart(
         )
         == decision
     )
+    assert (
+        restarted_store.get_compatible_representation(
+            snapshot.snapshot_id, representation.model_fingerprint
+        )
+        == representation
+    )
     assert state.items[(run.run_id, snapshot.crop_id)] == completed_item
     assert state.runs[run.run_id].completed_count == 1
 

@@ -13,10 +13,13 @@ from bird_recognition.embed.models import (
     RunItem,
     RunItemStatus,
     Sha256,
+    SpeciesCandidateSet,
     SpeciesDecision,
     StorageError,
+    TaggingConfig,
     Vector,
 )
+from bird_recognition.embed.scoring import validate_decision
 
 type FailureHook = Callable[[str], None]
 
@@ -84,6 +87,9 @@ class FakeStoreState:
     snapshots: dict[Sha256, IngestedCropSnapshot] = field(default_factory=dict)
     representations: dict[UUID, CropRepresentation] = field(default_factory=dict)
     decisions: dict[UUID, SpeciesDecision] = field(default_factory=dict)
+    models: dict[Sha256, EmbeddingModelRecord] = field(default_factory=dict)
+    candidate_sets: dict[Sha256, SpeciesCandidateSet] = field(default_factory=dict)
+    configs: dict[Sha256, TaggingConfig] = field(default_factory=dict)
     writer_locked: bool = False
 
 
@@ -109,10 +115,29 @@ class FakeStore:
         self._fail_at("release_writer_lock")
         self.state.writer_locked = False
 
-    def register_run(self, run: ProcessingRun, items: tuple[RunItem, ...]) -> None:
+    def register_run(
+        self,
+        run: ProcessingRun,
+        items: tuple[RunItem, ...],
+        model: EmbeddingModelRecord | None = None,
+        candidates: SpeciesCandidateSet | None = None,
+        config: TaggingConfig | None = None,
+    ) -> None:
         self._fail_at("before_register_run")
         if run.run_id in self.state.runs:
             raise StorageError("run already exists")
+        if (
+            model is not None
+            and candidates is not None
+            and config is not None
+            and (
+                run.config_fingerprint != config.config_fingerprint
+                or config.model_fingerprint != model.model_fingerprint
+                or config.candidate_set_fingerprint
+                != candidates.candidate_set_fingerprint
+            )
+        ):
+            raise StorageError("run immutable metadata does not match its config")
         runs = {**self.state.runs, run.run_id: run}
         registered_items = dict(self.state.items)
         for item in items:
@@ -125,6 +150,18 @@ class FakeStore:
         self._fail_at("before_register_commit")
         self.state.runs = runs
         self.state.items = registered_items
+        if model is not None:
+            self.state.models = {**self.state.models, model.model_fingerprint: model}
+        if candidates is not None:
+            self.state.candidate_sets = {
+                **self.state.candidate_sets,
+                candidates.candidate_set_fingerprint: candidates,
+            }
+        if config is not None:
+            self.state.configs = {
+                **self.state.configs,
+                config.config_fingerprint: config,
+            }
         self._fail_at("after_register_commit")
 
     def get_completed_decision(
@@ -153,18 +190,50 @@ class FakeStore:
             default=None,
         )
 
+    def get_compatible_representation(
+        self, snapshot_id: Sha256, model_fingerprint: Sha256
+    ) -> CropRepresentation | None:
+        self._fail_at("get_compatible_representation")
+        return min(
+            (
+                representation
+                for representation in self.state.representations.values()
+                if representation.snapshot_id == snapshot_id
+                and representation.model_fingerprint == model_fingerprint
+            ),
+            key=lambda representation: str(representation.representation_id),
+            default=None,
+        )
+
     def commit_crop_result(
         self,
         snapshot: IngestedCropSnapshot,
         representation: CropRepresentation,
         decision: SpeciesDecision,
         item: RunItem,
-    ) -> None:
+    ) -> bool:
         self._fail_at("before_crop_commit")
         if item.status is not RunItemStatus.COMPLETED:
             raise StorageError("crop commit requires a completed run item")
         if item.run_id not in self.state.runs:
             raise StorageError("crop commit references an unknown run")
+        config = self.state.configs.get(decision.config_fingerprint)
+        if (
+            representation.snapshot_id != snapshot.snapshot_id
+            or decision.representation_id != representation.representation_id
+            or decision.config_fingerprint
+            != self.state.runs[item.run_id].config_fingerprint
+            or config is not None
+            and representation.model_fingerprint != config.model_fingerprint
+        ):
+            raise StorageError("crop result model/config references are inconsistent")
+        candidate_set = (
+            self.state.candidate_sets.get(config.candidate_set_fingerprint)
+            if config is not None
+            else None
+        )
+        if candidate_set is not None:
+            validate_decision(decision, candidate_set.candidates)
         key = (item.run_id, item.crop_id)
         pending_item = self.state.items.get(key)
         if pending_item is None or pending_item.status is not RunItemStatus.PENDING:
@@ -198,6 +267,7 @@ class FakeStore:
         self.state.items = items
         self.state.runs = runs
         self._fail_at("after_crop_commit")
+        return True
 
     def mark_item_failed(self, item: RunItem) -> None:
         self._fail_at("before_mark_item_failed")
@@ -225,6 +295,59 @@ class FakeStore:
         self.state.items = {**self.state.items, key: item}
         self.state.runs = {**self.state.runs, run.run_id: updated_run}
         self._fail_at("after_mark_item_failed")
+
+    def mark_item_skipped(self, item: RunItem) -> None:
+        self._fail_at("before_mark_item_skipped")
+        if item.status is not RunItemStatus.SKIPPED or item.decision_id is None:
+            raise StorageError("skipped item transition requires a decision")
+        run = self.state.runs.get(item.run_id)
+        key = (item.run_id, item.crop_id)
+        decision = self.state.decisions.get(item.decision_id)
+        representation = (
+            self.state.representations.get(decision.representation_id)
+            if decision is not None
+            else None
+        )
+        if (
+            run is None
+            or self.state.items.get(key, item).status is not RunItemStatus.PENDING
+            or item.expected_snapshot_id is None
+            or decision is None
+            or decision.config_fingerprint != run.config_fingerprint
+            or representation is None
+            or representation.snapshot_id != item.expected_snapshot_id
+        ):
+            raise StorageError("skipped decision is incompatible with the run snapshot")
+        self.state.items = {**self.state.items, key: item}
+        self.state.runs = {
+            **self.state.runs,
+            run.run_id: replace(run, skipped_count=run.skipped_count + 1),
+        }
+        self._fail_at("after_mark_item_skipped")
+
+    def list_runs(self) -> list[dict[str, object]]:
+        return [
+            {"run_id": str(run.run_id), "status": run.status.value}
+            for run in sorted(
+                self.state.runs.values(),
+                key=lambda value: value.started_at,
+                reverse=True,
+            )
+        ]
+
+    def inspect_run(
+        self, run_id: UUID, crop_id: str | None = None
+    ) -> tuple[dict[str, object], list[dict[str, object]]]:
+        run = self.state.runs[run_id]
+        items = [
+            item
+            for (item_run_id, _), item in self.state.items.items()
+            if item_run_id == run_id and (crop_id is None or item.crop_id == crop_id)
+        ]
+        return (
+            {"run_id": str(run.run_id), "status": run.status.value},
+            [{"crop_id": item.crop_id, "status": item.status.value} for item in items],
+        )
 
     def finalize_run(self, run: ProcessingRun) -> None:
         self._fail_at("before_finalize_run")

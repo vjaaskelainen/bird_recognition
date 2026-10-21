@@ -1,6 +1,6 @@
 # CLI Contract: Species Indexing, Inspection, and Evaluation
 
-**Status**: Design contract; new commands are not implemented by the planning step.
+**Status**: `database-init`, `index`, and `inspect` are implemented for US1; `evaluate-species` remains planned.
 Existing `ingest` and `extract-frame` behavior stays unchanged.
 
 ## Invocation and common behavior

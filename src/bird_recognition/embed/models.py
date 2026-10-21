@@ -37,6 +37,10 @@ class StorageError(EmbedError):
     """Raised when persisted state cannot be read or safely written."""
 
 
+class PreflightError(StorageError):
+    """Raised when a command cannot safely begin because preflight failed."""
+
+
 class UnconfirmedCommitError(StorageError):
     """Raised when a commit may be durable but its acknowledgement was lost."""
 
@@ -305,6 +309,13 @@ class ProcessingRun:
     unknown_count: int
     failures: tuple[RunFailure, ...]
     sanitized_settings_json: str
+    durable_status_confirmed: bool = True
+    unconfirmed_crop_ids: tuple[str, ...] = ()
+    model_fingerprint: Sha256 | None = None
+    candidate_set_fingerprint: Sha256 | None = None
+    scoring_fingerprint: Sha256 | None = None
+    threshold: float | None = None
+    candidate_count: int = 0
 
     def __post_init__(self) -> None:
         _validate_sha256("config_fingerprint", self.config_fingerprint)
@@ -323,6 +334,20 @@ class ProcessingRun:
             raise EmbedValidationError(
                 "assigned and unknown counts must equal completed"
             )
+        for name in (
+            "model_fingerprint",
+            "candidate_set_fingerprint",
+            "scoring_fingerprint",
+        ):
+            value = getattr(self, name)
+            if value is not None:
+                _validate_sha256(name, value)
+        if self.threshold is not None and (
+            not math.isfinite(self.threshold) or not 0 <= self.threshold <= 1
+        ):
+            raise EmbedValidationError("run threshold must be finite and within [0, 1]")
+        if self.candidate_count < 0:
+            raise EmbedValidationError("candidate count must be non-negative")
         if (
             self.completed_count + self.skipped_count + self.failed_count
             > self.selected_count
@@ -387,6 +412,7 @@ class RunItem:
         if self.status in (RunItemStatus.COMPLETED, RunItemStatus.SKIPPED):
             if (
                 not has_decision
+                or self.expected_snapshot_id is None
                 or self.failure_code is not None
                 or self.failure_reason is not None
             ):
@@ -422,7 +448,7 @@ class ModelProtocol(Protocol):
 class StoreProtocol(Protocol):
     """Persistence interface for preflight, indexing, and durable run updates."""
 
-    def preflight(self) -> None:
+    def preflight(self, *, read_only: bool = False) -> None:
         """Verify the existing database contract without changing its schema."""
 
     def acquire_writer_lock(self) -> None:
@@ -431,7 +457,14 @@ class StoreProtocol(Protocol):
     def release_writer_lock(self) -> None:
         """Release the indexing lock when held by this store session."""
 
-    def register_run(self, run: ProcessingRun, items: tuple[RunItem, ...]) -> None:
+    def register_run(
+        self,
+        run: ProcessingRun,
+        items: tuple[RunItem, ...],
+        model: EmbeddingModelRecord,
+        candidates: SpeciesCandidateSet,
+        config: TaggingConfig,
+    ) -> None:
         """Persist a run and its pending items after successful preflight."""
 
     def get_completed_decision(
@@ -442,20 +475,36 @@ class StoreProtocol(Protocol):
     ) -> SpeciesDecision | None:
         """Return an exact compatible durable decision, if one exists."""
 
+    def get_compatible_representation(
+        self, snapshot_id: Sha256, model_fingerprint: Sha256
+    ) -> CropRepresentation | None:
+        """Return a persisted image vector compatible with snapshot and model."""
+
     def commit_crop_result(
         self,
         snapshot: IngestedCropSnapshot,
         representation: CropRepresentation,
         decision: SpeciesDecision,
         item: RunItem,
-    ) -> None:
+    ) -> bool:
         """Atomically persist crop provenance, result, item, and run counters."""
 
     def mark_item_failed(self, item: RunItem) -> None:
         """Persist one isolated crop failure and update its run counters."""
 
+    def mark_item_skipped(self, item: RunItem) -> None:
+        """Persist a skipped item linked to its existing durable decision."""
+
     def finalize_run(self, run: ProcessingRun) -> None:
         """Persist the final run state and counters."""
+
+    def list_runs(self) -> list[dict[str, object]]:
+        """Return persisted run summaries newest first."""
+
+    def inspect_run(
+        self, run_id: UUID, crop_id: str | None = None
+    ) -> tuple[dict[str, object], list[dict[str, object]]]:
+        """Return persisted run and item details without external asset access."""
 
 
 def _validate_sha256(name: str, value: Sha256) -> None:

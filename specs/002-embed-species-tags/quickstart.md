@@ -1,7 +1,7 @@
 # Quickstart: Validate Crop Embeddings and Species Tags
 
-**Status**: Implementation acceptance guide. New commands/test paths below are
-planned interfaces, not functionality added by `/skill:speckit-plan`.
+**Status**: US1 commands and offline contracts are implemented. Real PostgreSQL,
+installed-wheel, provisioned-model, and US2/US3 acceptance gates remain pending.
 
 Run all commands from `C:\code\bird_recognition` in PowerShell 5.1. Use the
 existing `.venv`; if absent, stop and ask the developer. Do not activate it.

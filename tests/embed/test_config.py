@@ -7,13 +7,14 @@ from pathlib import Path
 import pytest
 
 from bird_recognition.embed.config import (
+    build_tagging_config,
     canonical_json_bytes,
     load_species_candidates,
     sanitize_error,
     validate_local_database_url,
     validate_threshold,
 )
-from bird_recognition.embed.models import EmbedValidationError
+from bird_recognition.embed.models import EmbeddingModelRecord, EmbedValidationError
 
 
 def _species_document(
@@ -266,3 +267,33 @@ def test_sanitize_error_redacts_database_credentials_and_url() -> None:
     assert "private-pass" not in sanitized
     assert "database.example" not in sanitized
     assert "postgresql://" not in sanitized
+
+
+def test_build_tagging_config_keeps_scoring_identity_threshold_independent(
+    model_record: EmbeddingModelRecord, tmp_path: Path
+) -> None:
+    first_file = _write_species_file(
+        tmp_path / "species.json",
+        json.dumps(
+            _species_document(
+                [
+                    {"id": "bird-b", "name": "Blue Bird"},
+                    {"id": "bird-a", "name": "Red Bird"},
+                ]
+            )
+        ),
+    )
+    candidate_set = load_species_candidates(first_file)
+
+    first = build_tagging_config(model_record, candidate_set, 0.5)
+    retagged = build_tagging_config(model_record, candidate_set, 0.75)
+
+    assert first.scoring_fingerprint == retagged.scoring_fingerprint
+    assert first.config_fingerprint != retagged.config_fingerprint
+    assert first.prompt_template == "a photo of {name}."
+    assert first.prompt_version == "species-photo-v1"
+    assert json.loads(first.scoring_json)["score_formula"] == (
+        "effective_logit_scale * dot(normalized_image, normalized_text)"
+    )
+    assert json.loads(first.canonical_json)["threshold"] == 0.5
+    assert json.loads(retagged.canonical_json)["threshold"] == 0.75

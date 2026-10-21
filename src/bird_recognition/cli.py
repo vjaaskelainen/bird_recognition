@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import math
 import os
 import subprocess
@@ -248,6 +249,54 @@ def _build_parser() -> argparse.ArgumentParser:
     frame_parser.add_argument(
         "--output", required=True, type=Path, help="private output directory"
     )
+
+    database_parser = commands.add_parser(
+        "database-init", help="initialize the local embedding database schema"
+    )
+    database_parser.add_argument(
+        "--database-url",
+        default=environment.get("BIRD_RECOGNITION_DATABASE_URL"),
+        help="local PostgreSQL connection URL",
+    )
+    database_parser.add_argument("--json", action="store_true")
+
+    index_parser = commands.add_parser("index", help="index retained animal crops")
+    index_parser.add_argument("--manifest", required=True, type=Path)
+    index_parser.add_argument("--crop-root", type=Path)
+    index_parser.add_argument(
+        "--species-list",
+        type=Path,
+        default=environment.get("BIRD_RECOGNITION_SPECIES_LIST") or None,
+    )
+    index_parser.add_argument(
+        "--model-dir",
+        type=Path,
+        default=environment.get("BIRD_RECOGNITION_BIOCLIP_MODEL_DIR") or None,
+    )
+    index_parser.add_argument(
+        "--threshold",
+        default=environment.get("BIRD_RECOGNITION_SPECIES_THRESHOLD") or "0.5",
+    )
+    index_parser.add_argument(
+        "--database-url",
+        default=environment.get("BIRD_RECOGNITION_DATABASE_URL"),
+        help="local PostgreSQL connection URL",
+    )
+    index_parser.add_argument("--json", action="store_true")
+
+    inspect_parser = commands.add_parser(
+        "inspect", help="inspect persisted embedding runs and decisions"
+    )
+    inspect_parser.add_argument(
+        "--database-url",
+        default=environment.get("BIRD_RECOGNITION_DATABASE_URL"),
+        help="local PostgreSQL connection URL",
+    )
+    selection = inspect_parser.add_mutually_exclusive_group(required=True)
+    selection.add_argument("--run-id", type=str)
+    selection.add_argument("--list-runs", action="store_true")
+    inspect_parser.add_argument("--crop-id")
+    inspect_parser.add_argument("--json", action="store_true")
     return parser
 
 
@@ -291,6 +340,14 @@ def main(argv: list[str] | None = None, detector: Detector | None = None) -> int
     """Run the bird-recognition command."""
     parser = _build_parser()
     arguments = parser.parse_args(argv)
+    if arguments.command in {"database-init", "index", "inspect"}:
+        if (
+            arguments.command == "inspect"
+            and arguments.crop_id
+            and not arguments.run_id
+        ):
+            parser.error("--crop-id requires --run-id")
+        return _dispatch_embed_command(arguments)
     try:
         if arguments.command == "extract-frame":
             destination = extract_frame(
@@ -374,6 +431,186 @@ def main(argv: list[str] | None = None, detector: Detector | None = None) -> int
         )
         print(f"{label} error: {error}", file=sys.stderr)
         return 1
+
+
+def _dispatch_embed_command(arguments: argparse.Namespace) -> int:
+    from uuid import UUID
+
+    from bird_recognition.embed.config import (
+        EmbedValidationError,
+        sanitize_error,
+        validate_local_database_url,
+    )
+    from bird_recognition.embed.models import EmbedError, PreflightError, RunStatus
+    from bird_recognition.embed.scoring import (
+        RELATIVE_CONFIDENCE_WARNING,
+        SINGLE_CANDIDATE_WARNING,
+    )
+    from bird_recognition.embed.storage import PgVectorStore, initialize_database
+
+    try:
+        if not arguments.database_url:
+            raise EmbedValidationError("--database-url is required")
+        validate_local_database_url(arguments.database_url)
+        if arguments.command == "database-init":
+            result = initialize_database(arguments.database_url)
+            payload = {
+                "schema_version": 1,
+                "status": "initialized",
+                "database_schema_version": result.schema_version,
+                "vector_available": result.vector_available,
+                "changes_applied": result.changes_applied,
+            }
+            run = None
+        elif arguments.command == "inspect":
+            store = PgVectorStore(arguments.database_url)
+            store.preflight(read_only=True)
+            if arguments.list_runs:
+                payload = {"schema_version": 1, "runs": store.list_runs()}
+            else:
+                run_data, items = store.inspect_run(
+                    UUID(arguments.run_id), arguments.crop_id
+                )
+                payload = {"schema_version": 1, "run": run_data, "items": items}
+            store.close()
+            run = None
+        else:
+            if arguments.crop_root is None:
+                manifest_path = arguments.manifest.expanduser().resolve(strict=True)
+                crop_root = manifest_path.parent
+            else:
+                crop_root = arguments.crop_root
+            if arguments.species_list is None:
+                raise EmbedValidationError("--species-list is required")
+            if arguments.model_dir is None:
+                raise EmbedValidationError("--model-dir is required")
+            from bird_recognition.embed.pipeline import index_manifest
+
+            store = PgVectorStore(arguments.database_url)
+            run = index_manifest(
+                arguments.manifest,
+                crop_root=crop_root,
+                species_path=arguments.species_list,
+                model_directory=arguments.model_dir,
+                threshold=arguments.threshold,
+                store=store,
+            )
+            payload = {
+                "schema_version": 1,
+                "run_id": str(run.run_id),
+                "status": run.status.value,
+                "config_fingerprint": run.config_fingerprint,
+                "model_fingerprint": run.model_fingerprint,
+                "candidate_set_fingerprint": run.candidate_set_fingerprint,
+                "scoring_fingerprint": run.scoring_fingerprint,
+                "threshold": run.threshold,
+                "counts": {
+                    "selected": run.selected_count,
+                    "completed": run.completed_count,
+                    "skipped": run.skipped_count,
+                    "failed": run.failed_count,
+                    "assigned": run.assigned_count,
+                    "unknown": run.unknown_count,
+                    "pending": run.pending_count,
+                },
+                "failures": [
+                    {
+                        "crop_id": item.crop_id,
+                        "code": item.code,
+                        "reason": item.reason,
+                    }
+                    for item in run.failures
+                ],
+                "warnings": [RELATIVE_CONFIDENCE_WARNING]
+                + ([SINGLE_CANDIDATE_WARNING] if run.candidate_count == 1 else []),
+                "durable_status_confirmed": run.durable_status_confirmed,
+                "unconfirmed_crop_ids": list(run.unconfirmed_crop_ids),
+            }
+            store.close()
+        if arguments.json:
+            print(json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str))
+        else:
+            print(json.dumps(payload, ensure_ascii=False, indent=2, default=str))
+        if run is not None and (
+            run.status in {RunStatus.PARTIAL_FAILURE, RunStatus.FAILED}
+            or not run.durable_status_confirmed
+            or run.unconfirmed_crop_ids
+        ):
+            return 1
+        return 0
+    except (EmbedValidationError, ValueError, OSError) as error:
+        if arguments.json:
+            print(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "status": "preflight_failure",
+                        "code": _preflight_code(error),
+                        "message": sanitize_error(str(error)),
+                        "run_id": None,
+                    },
+                    sort_keys=True,
+                )
+            )
+        else:
+            print(f"Preflight error: {sanitize_error(str(error))}", file=sys.stderr)
+        return 2
+    except EmbedError as error:
+        is_preflight = (
+            isinstance(error, PreflightError) or arguments.command == "database-init"
+        )
+        if arguments.json:
+            result: dict[str, object] = {
+                "schema_version": 1,
+                "status": "preflight_failure"
+                if is_preflight
+                else "operational_failure",
+                "message": sanitize_error(str(error)),
+            }
+            if is_preflight:
+                result.update({"code": _preflight_code(error), "run_id": None})
+            print(json.dumps(result, sort_keys=True))
+        else:
+            label = "Preflight error" if is_preflight else "Embedding operation failed"
+            print(f"{label}: {sanitize_error(str(error))}", file=sys.stderr)
+        return 2 if is_preflight else 1
+    except Exception as error:
+        sanitized = sanitize_error(str(error))
+        if arguments.json:
+            print(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "status": "operational_failure",
+                        "message": sanitized,
+                    },
+                    sort_keys=True,
+                )
+            )
+        else:
+            print(f"Embedding operation failed: {sanitized}", file=sys.stderr)
+        return 1
+
+
+def _preflight_code(error: Exception) -> str:
+    message = str(error).casefold()
+    if "writer_busy" in message or "writer busy" in message:
+        return "writer_busy"
+    if "vector" in message:
+        return "vector_unavailable"
+    if "schema" in message:
+        return "schema_mismatch"
+    if "database" in message or "postgres" in message:
+        return "database_unavailable"
+    if "threshold" in message:
+        return "invalid_threshold"
+    if "model" in message or "bioclip" in message:
+        return "invalid_model"
+    if "species" in message or "candidate" in message:
+        return "invalid_species"
+    if "manifest" in message:
+        return "invalid_manifest"
+    return "invalid_selection"
 
 
 class _NoInferenceDetector:

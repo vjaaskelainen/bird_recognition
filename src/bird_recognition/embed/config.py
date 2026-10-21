@@ -13,10 +13,12 @@ from typing import Any
 from urllib.parse import parse_qs, urlsplit
 
 from bird_recognition.embed.models import (
+    EmbeddingModelRecord,
     EmbedValidationError,
     Sha256,
     SpeciesCandidate,
     SpeciesCandidateSet,
+    TaggingConfig,
 )
 
 _DATABASE_URL_PATTERN = re.compile(
@@ -61,6 +63,56 @@ def sha256_hex(value: bytes) -> Sha256:
 def canonical_json_sha256(value: Any) -> Sha256:
     """Return the SHA-256 digest of canonical JSON content."""
     return sha256_hex(canonical_json_bytes(value))
+
+
+def build_tagging_config(
+    model: EmbeddingModelRecord,
+    candidate_set: SpeciesCandidateSet,
+    threshold: object = None,
+) -> TaggingConfig:
+    """Build canonical model, candidate, scoring, and decision identities."""
+    validated_threshold = validate_threshold(threshold)
+    scoring = {
+        "schema_version": 1,
+        "model_fingerprint": model.model_fingerprint,
+        "candidate_set_fingerprint": candidate_set.candidate_set_fingerprint,
+        "candidates": json.loads(candidate_set.candidates_json),
+        "prompt_template": "a photo of {name}.",
+        "prompt_version": "species-photo-v1",
+        "effective_logit_scale": model.logit_scale,
+        "score_formula": (
+            "effective_logit_scale * dot(normalized_image, normalized_text)"
+        ),
+        "normalization": "L2-unit-float32-tolerance-1e-5",
+        "softmax": "stable-float64-v1",
+        "tie_policy": "exact-equal-maximum-logits-v1",
+        "score_order": "candidate-id-ascending",
+    }
+    scoring_json = canonical_json_bytes(scoring).decode("utf-8")
+    scoring_fingerprint = canonical_json_sha256(scoring)
+    canonical = {
+        "schema_version": 1,
+        "model_fingerprint": model.model_fingerprint,
+        "model": json.loads(model.canonical_json),
+        "candidate_set_fingerprint": candidate_set.candidate_set_fingerprint,
+        "candidates": json.loads(candidate_set.candidates_json),
+        "scoring_fingerprint": scoring_fingerprint,
+        "scoring": scoring,
+        "threshold": validated_threshold,
+    }
+    canonical_json = canonical_json_bytes(canonical).decode("utf-8")
+    return TaggingConfig(
+        config_fingerprint=canonical_json_sha256(canonical),
+        model_fingerprint=model.model_fingerprint,
+        candidate_set_fingerprint=candidate_set.candidate_set_fingerprint,
+        scoring_fingerprint=scoring_fingerprint,
+        prompt_template="a photo of {name}.",
+        prompt_version="species-photo-v1",
+        effective_logit_scale=model.logit_scale,
+        scoring_json=scoring_json,
+        threshold=validated_threshold,
+        canonical_json=canonical_json,
+    )
 
 
 def _reject_duplicate_json_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:

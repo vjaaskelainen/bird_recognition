@@ -4,7 +4,7 @@
 
 **Input**: `specs/002-embed-species-tags/spec.md`
 
-**Status**: Phase 0 research and Phase 1 design complete; implementation not started.
+**Status**: Phase 0 research and Phase 1 design complete; US1 code implemented, with real PostgreSQL and packaged-wheel acceptance still pending.
 
 ## Summary
 
