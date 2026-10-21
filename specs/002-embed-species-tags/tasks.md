@@ -114,7 +114,7 @@
 
 **Purpose**: Complete private-data safeguards, documentation, runnable boundary validation and measured-quality evidence.
 
-- [ ] T044 [P] Add explicitly opted-in local-model smoke coverage in tests/smoke/test_bioclip_smoke.py using BIRD_RECOGNITION_BIOCLIP_SMOKE_MODEL_DIR and BIRD_RECOGNITION_BIOCLIP_SMOKE_IMAGE; deny network, verify deterministic finite normalized 512-vectors and candidate scores, and state that smoke execution is not species-quality evidence.
+- [x] T044 [P] Add explicitly opted-in local-model smoke coverage in tests/smoke/test_bioclip_smoke.py using BIRD_RECOGNITION_BIOCLIP_SMOKE_MODEL_DIR and BIRD_RECOGNITION_BIOCLIP_SMOKE_IMAGE; deny network, verify deterministic finite normalized 512-vectors and candidate scores, and state that smoke execution is not species-quality evidence.
 - [ ] T045 [P] Update README.md with model/dependency provisioning, local-only pgvector/schema setup, candidate JSON, threshold/relative-confidence caveats, run-scoped inspect, retry/retag/evaluation commands and private external destinations; retain ingestion/extract-frame independence and link to the feature quickstart rather than duplicating detailed contracts.
 - [ ] T046 [P] Add a dedicated opt-in disposable local PostgreSQL acceptance job and retain network-free default pytest/Ruff checks in .github/workflows/ci.yml; use explicit test URL/service health and schema cleanup, require real persistence tests before acceptance, avoid production URLs/model downloads, and pin any added third-party actions to full commit SHAs with adjacent version comments.
 - [ ] T047 Align specs/002-embed-species-tags/quickstart.md, specs/002-embed-species-tags/contracts/cli.md and AGENTS.md with the implemented safe workflow and actual option/schema details; keep guidance brief, link to authoritative docs, record developer-sync/approval requirements and distinguish offline correctness, DB proof, optional model smoke and actual quality gates.
@@ -211,4 +211,3 @@ All examples assume preceding phase/gates and common fixtures are complete; test
 [US1]: spec.md#user-story-1---index-and-identify-ingested-crops-priority-p1
 [US2]: spec.md#user-story-2---control-the-candidate-species-priority-p2
 [US3]: spec.md#user-story-3---resume-processing-and-inspect-quality-priority-p3
-

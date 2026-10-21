@@ -246,7 +246,7 @@ def _asset_file(root: Path, name: str, manifest: dict[str, Any]) -> Path:
 
 def _read_model_config(path: Path) -> dict[str, Any]:
     try:
-        config = json.loads(
+        document = json.loads(
             path.read_text(encoding="utf-8"),
             object_pairs_hook=_unique_object,
             parse_constant=_reject_constant,
@@ -255,8 +255,18 @@ def _read_model_config(path: Path) -> dict[str, Any]:
         raise EmbedValidationError(
             "BioCLIP model config is unreadable or invalid"
         ) from None
-    if not isinstance(config, dict):
+    if not isinstance(document, dict):
         raise EmbedValidationError("BioCLIP model config must be an object")
+    if "model_cfg" in document:
+        model_config = document["model_cfg"]
+        preprocess_config = document.get("preprocess_cfg", {})
+        if not isinstance(model_config, dict) or not isinstance(
+            preprocess_config, dict
+        ):
+            raise EmbedValidationError("BioCLIP model config fields are invalid")
+        config = {**model_config, "preprocess_cfg": preprocess_config}
+    else:
+        config = document
     vision = config.get("vision_cfg")
     text = config.get("text_cfg")
     if (

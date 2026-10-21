@@ -26,14 +26,20 @@ def _write_asset_bundle(
         json.dumps(
             config
             or {
-                "embed_dim": 512,
-                "vision_cfg": {
-                    "image_size": 224,
-                    "layers": 12,
-                    "width": 768,
-                    "patch_size": 16,
+                "model_cfg": {
+                    "embed_dim": 512,
+                    "vision_cfg": {
+                        "image_size": 224,
+                        "layers": 12,
+                        "width": 768,
+                        "patch_size": 16,
+                    },
+                    "text_cfg": {"context_length": 77, "width": 512},
                 },
-                "text_cfg": {"context_length": 77, "width": 512},
+                "preprocess_cfg": {
+                    "mean": [0.48145466, 0.4578275, 0.40821073],
+                    "std": [0.26862954, 0.26130258, 0.27577711],
+                },
             }
         ),
         encoding="utf-8",
