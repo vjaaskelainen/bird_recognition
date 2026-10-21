@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from tests.ingest.fakes import FakeDetector
+from tests.unit.ingest.fakes import FakeDetector
 
 
 @pytest.fixture

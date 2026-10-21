@@ -39,7 +39,7 @@ This guide defines local end-to-end validation for [spec.md](spec.md). Ingestion
 Run focused tests, then the full offline test suite:
 
 ```powershell
-  .\.venv\Scripts\python.exe -m pytest tests\ingest
+  .\.venv\Scripts\python.exe -m pytest tests\unit\ingest
   .\.venv\Scripts\python.exe -m pytest
 ```
 
@@ -77,10 +77,10 @@ fixture and separately provisioned files. Review labeled local examples against
 absolute animal-recall and person-detection acceptance criteria; a V5 comparison
 is not required. Record misses and false detections before using private batches.
 Set all three `BIRD_RECOGNITION_SMOKE_*` paths in `.env` and explicitly run the
-test through `dotenv` so the default pytest suite remains offline:
+  test through `dotenv`; smoke tests are outside the default unit-test discovery:
 
 ```powershell
-.\.venv\Scripts\uv.exe run dotenv -f .env run -- pytest tests/ingest/test_detection_smoke.py -q
+.\.venv\Scripts\uv.exe run dotenv -f .env run -- pytest tests/smoke/test_detection_smoke.py -q
 ```
 
 The test skips when these paths are not set; it is not part of normal offline

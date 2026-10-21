@@ -20,7 +20,7 @@ from bird_recognition.embed.models import (
     SpeciesDecision,
     UnconfirmedCommitError,
 )
-from tests.embed.fakes import FakeModel, FakeStore, FakeStoreState
+from tests.unit.embed.fakes import FakeModel, FakeStore, FakeStoreState
 
 
 def _create_run(now: datetime) -> ProcessingRun:

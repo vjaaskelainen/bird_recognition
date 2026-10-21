@@ -19,7 +19,7 @@ from bird_recognition.embed.models import (
     UnconfirmedCommitError,
 )
 from bird_recognition.embed.pipeline import index_crops
-from tests.embed.fakes import FakeModel, FakeStore, FakeStoreState
+from tests.unit.embed.fakes import FakeModel, FakeStore, FakeStoreState
 
 
 def _snapshot(crop_id: str, path: Path, image_bytes: bytes) -> IngestedCropSnapshot:

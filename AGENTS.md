@@ -13,7 +13,9 @@ Always run commands from the repository root, using these exact forms in PowerSh
 
 | Task                       | Command                                                         |
 |----------------------------|-----------------------------------------------------------------|
-| Run all tests              | `.\.venv\Scripts\python.exe -m pytest`                          |
+| Run all unit tests         | `.\.venv\Scripts\python.exe -m pytest`                          |
+| Run smoke tests            | `.\.venv\Scripts\python.exe -m pytest tests\smoke`              |
+| Run integration tests      | `.\.venv\Scripts\python.exe -m pytest tests\integration`        |
 | Run one test file          | `.\.venv\Scripts\python.exe -m pytest tests\test_foo.py`        |
 | Run a single test          | `.\.venv\Scripts\python.exe -m pytest tests\test_foo.py::test_bar` |
 | Run any other Python tool  | `.\.venv\Scripts\uv.exe run <tool> <args>`                      |
@@ -22,6 +24,9 @@ Always run commands from the repository root, using these exact forms in PowerSh
 | Install/sync dependencies  | `.\.venv\Scripts\uv.exe sync`                                   |
 | Add a dependency           | `.\.venv\Scripts\uv.exe add <package>`                          |
 | Add a dev dependency       | `.\.venv\Scripts\uv.exe add --dev <package>`                    |
+
+Pytest defaults to `tests/unit`; smoke tests require local assets, and integration
+tests require `BIRD_RECOGNITION_TEST_DATABASE_URL` for a disposable local database.
 
 Rules:
 - Never run bare `pytest`, `python`, `pip`, `uv` or any other tool name. They are not

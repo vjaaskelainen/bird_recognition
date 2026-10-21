@@ -6,7 +6,7 @@ from PIL import Image
 
 from bird_recognition.cli import main
 from bird_recognition.ingest.models import Detection, DetectionCategory
-from tests.ingest.fakes import FakeDetector
+from tests.unit.ingest.fakes import FakeDetector
 
 
 def test_cli_persists_crop_provenance_and_saved_region(

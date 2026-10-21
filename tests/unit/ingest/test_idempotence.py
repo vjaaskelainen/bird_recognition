@@ -16,7 +16,7 @@ from bird_recognition.ingest.models import (
     SampledFrame,
 )
 from bird_recognition.ingest.pipeline import run_batch
-from tests.ingest.fakes import FakeDetector
+from tests.unit.ingest.fakes import FakeDetector
 
 
 def test_source_identity_distinguishes_same_basename_different_paths(

@@ -11,8 +11,8 @@
 **Purpose**: Add only the runtime/test dependencies and package/test structure needed by the planned CLI workflow.
 
 - [X] T001 Verify the official MegaDetector inference API/model format and PyTorch, PyAV, Pillow, and pytest compatibility on Python 3.14; declare the tested runtime/development dependency constraints in `pyproject.toml`. Do not edit `uv.lock`; request owner-run `uv sync` per `AGENTS.md`. **Validated 2026-10-18** on Windows/Python 3.14 after owner-run sync: PyTorch 2.14.1, PyAV 19.0.1, Pillow 12.3.0, PyTorch-Wildlife 1.3.0, pytest 9.1.1; real V6 smoke and full pytest suite passed. See `megadetector-v6-upgrade-plan.md`.
-- [X] T002 Create the planned ingestion package and test package structure with `src/bird_recognition/ingest/__init__.py` and `tests/ingest/__init__.py`.
-- [X] T003 [P] Add reusable tiny synthetic video/frame fixtures and deterministic fake-detector helpers in `tests/ingest/conftest.py`; fixtures must not contain private footage or require model weights/network access.
+- [X] T002 Create the planned ingestion package and test package structure with `src/bird_recognition/ingest/__init__.py` and `tests/unit/ingest/__init__.py`.
+- [X] T003 [P] Add reusable tiny synthetic video/frame fixtures and deterministic fake-detector helpers in `tests/unit/ingest/conftest.py`; fixtures must not contain private footage or require model weights/network access.
 
 ---
 
@@ -35,10 +35,10 @@
 
 ### Tests for User Story 1
 
-- [x] T006 [P] \[US1\] Add PTS sampling tests for elapsed-time-zero sampling, requested interval, actual frame ordinal/time, variable frame timing, short clips, and corrupt/missing sampled-frame handling in `tests/ingest/test_sampling.py`.
-- [x] T007 [P] \[US1\] Add controlled-detection tests for animal/person/other categories, inclusive category thresholds, person precedence, empty/vehicle-only frames, and no retention after detection failure in `tests/ingest/test_filtering.py`.
-- [x] T008 [P] \[US1\] Add crop geometry tests for clipped boxes, positive-area validation, pixel-coordinate mapping, and right/bottom-exclusive image regions in `tests/ingest/test_crops.py`.
-- [x] T009 [P] \[US1\] Add initial command tests for required paths, numeric validation, help, and processing a small fixture with an injected detector in `tests/ingest/test_cli.py`.
+- [x] T006 [P] \[US1\] Add PTS sampling tests for elapsed-time-zero sampling, requested interval, actual frame ordinal/time, variable frame timing, short clips, and corrupt/missing sampled-frame handling in `tests/unit/ingest/test_sampling.py`.
+- [x] T007 [P] \[US1\] Add controlled-detection tests for animal/person/other categories, inclusive category thresholds, person precedence, empty/vehicle-only frames, and no retention after detection failure in `tests/unit/ingest/test_filtering.py`.
+- [x] T008 [P] \[US1\] Add crop geometry tests for clipped boxes, positive-area validation, pixel-coordinate mapping, and right/bottom-exclusive image regions in `tests/unit/ingest/test_crops.py`.
+- [x] T009 [P] \[US1\] Add initial command tests for required paths, numeric validation, help, and processing a small fixture with an injected detector in `tests/unit/ingest/test_cli.py`.
 
 ### Implementation for User Story 1
 
@@ -47,7 +47,7 @@
 - [X] T012 [P] \[US1\] Implement box validation/clipping and deterministic local crop encoding in `src/bird_recognition/ingest/crops.py`; store each box as clipped original-frame pixel coordinates `(left, top, right, bottom)` with right/bottom exclusive, reject malformed or zero-area regions, and stage/publish one frame's crops as a complete set or publish none.
 - [X] T013 \[US1\] Implement the sampled-frame filtering pipeline in `src/bird_recognition/ingest/pipeline.py`; evaluate each complete frame once, apply inclusive separate thresholds, give qualifying people precedence, discard no-animal/vehicle-only frames, publish no image for person-excluded or failed-detection frames, and report a crop/storage failure without exposing a partial frame result.
 - [X] T014 \[US1\] Implement the `ingest` argparse command, default interval/threshold values, preflight validation, model configuration, readable help, and the `bird-recognition` console entry point in `src/bird_recognition/cli.py` and `pyproject.toml`.
-- [x] T015 \[US1\] Integrate fixture decoding, controlled detection, and crop assertions in `tests/ingest/test_cli.py`; verify a frame with multiple safe animal detections yields separate crops and a mixed person/animal frame yields none.
+- [x] T015 \[US1\] Integrate fixture decoding, controlled detection, and crop assertions in `tests/unit/ingest/test_cli.py`; verify a frame with multiple safe animal detections yields separate crops and a mixed person/animal frame yields none.
 
 **Checkpoint**: User Story 1 produces local privacy-filtered crops and can be tested without a model service or database service.
 
@@ -61,10 +61,10 @@
 
 ### Tests for User Story 2
 
-- [X] T016 [P] \[US2\] Add manifest/model tests for required crop provenance, foreign-key relationships, confidence and box constraints, timezone-unknown representation, and common frame lighting across crops in `tests/ingest/test_metadata.py`.
-- [X] T017 [P] \[US2\] Add capture-time tests for reliable offset timestamps plus elapsed PTS time, local time with unknown timezone, missing/malformed/conflicting metadata, and no filesystem-time fallback in `tests/ingest/test_capture_time.py`.
-- [X] T018 [P] \[US2\] Add verified color-day, infrared-night, and ambiguous-image tests for the deterministic lighting classifier in `tests/ingest/test_lighting.py`.
-- [X] T019 [P] \[US2\] Add persistence tests that reopen the output manifest, verify crop file hashes/locations and original-frame boxes, and ensure crop rows never point to missing images in `tests/ingest/test_storage.py`.
+- [X] T016 [P] \[US2\] Add manifest/model tests for required crop provenance, foreign-key relationships, confidence and box constraints, timezone-unknown representation, and common frame lighting across crops in `tests/unit/ingest/test_metadata.py`.
+- [X] T017 [P] \[US2\] Add capture-time tests for reliable offset timestamps plus elapsed PTS time, local time with unknown timezone, missing/malformed/conflicting metadata, and no filesystem-time fallback in `tests/unit/ingest/test_capture_time.py`.
+- [X] T018 [P] \[US2\] Add verified color-day, infrared-night, and ambiguous-image tests for the deterministic lighting classifier in `tests/unit/ingest/test_lighting.py`.
+- [X] T019 [P] \[US2\] Add persistence tests that reopen the output manifest, verify crop file hashes/locations and original-frame boxes, and ensure crop rows never point to missing images in `tests/unit/ingest/test_storage.py`.
 
 ### Implementation for User Story 2
 
@@ -73,7 +73,7 @@
 - [X] T022 \[US2\] Extend video metadata extraction in `src/bird_recognition/ingest/video.py` to parse only recognized reliable capture-start metadata, preserve explicit timezone offsets, represent timezone ambiguity as unknown, and never use filename, file modification, or ingestion time.
 - [X] T023 \[US2\] Extend crop/run orchestration in `src/bird_recognition/ingest/pipeline.py` to persist all required data-model fields, link each crop to its source/frame/detection/run/settings, share lighting and frame dimensions, and compute stable source/settings/crop identities; preserve operational run time as distinct from capture time and retain explicit unknown capture time/timezone instead of filesystem or ingestion-time fallbacks.
 - [X] T024 \[US2\] Implement frame-level staged image publication and SQLite transaction coordination in `src/bird_recognition/ingest/crops.py` and `src/bird_recognition/ingest/manifest.py`; commit all frame crops/records together only after every image and metadata record is complete, otherwise expose none as successful.
-- [X] T025 \[US2\] Add end-to-end provenance tests that reopen a completed run and verify timestamp derivation, explicit unknowns, lighting, detection confidence, image dimensions, and crop region equality in `tests/ingest/test_cli.py`.
+- [X] T025 \[US2\] Add end-to-end provenance tests that reopen a completed run and verify timestamp derivation, explicit unknowns, lighting, detection confidence, image dimensions, and crop region equality in `tests/unit/ingest/test_cli.py`.
 
 **Checkpoint**: Each retained crop is durable and independently traceable to its original source frame and effective run settings.
 
@@ -87,9 +87,9 @@
 
 ### Tests for User Story 3
 
-- [X] T026 [P] \[US3\] Add unchanged-rerun, changed-content/settings, and same-basename collision tests in `tests/ingest/test_idempotence.py`.
-- [X] T027 [P] \[US3\] Add mixed readable/unreadable batch, per-frame failure, crop-write failure, interrupted-publication recovery, and frame-count reconciliation tests in `tests/ingest/test_batch.py`.
-- [X] T028 [P] \[US3\] Add CLI tests for empty input, source/frame summaries, partial/total failure status, and exit codes `0`, `1`, and `2` in `tests/ingest/test_cli.py`.
+- [X] T026 [P] \[US3\] Add unchanged-rerun, changed-content/settings, and same-basename collision tests in `tests/unit/ingest/test_idempotence.py`.
+- [X] T027 [P] \[US3\] Add mixed readable/unreadable batch, per-frame failure, crop-write failure, interrupted-publication recovery, and frame-count reconciliation tests in `tests/unit/ingest/test_batch.py`.
+- [X] T028 [P] \[US3\] Add CLI tests for empty input, source/frame summaries, partial/total failure status, and exit codes `0`, `1`, and `2` in `tests/unit/ingest/test_cli.py`.
 
 ### Implementation for User Story 3
 
@@ -98,7 +98,7 @@
 - [X] T031 \[US3\] Implement destination writer locking, stale staging cleanup, orphan crop-directory reconciliation, and rollback/cleanup of failed frame publication in `src/bird_recognition/ingest/manifest.py` and `src/bird_recognition/ingest/crops.py`.
 - [X] T032 \[US3\] Implement batch/source/frame failure isolation and run summary accounting in `src/bird_recognition/ingest/pipeline.py`; report processed/skipped/failed videos, sampled frames, each mutually exclusive frame outcome, and crops as a separate count.
 - [X] T033 \[US3\] Complete CLI preflight, no-input messaging, per-source actionable errors, summary rendering, and exit-code mapping in `src/bird_recognition/cli.py`; reject invalid values/unsafe paths before producing outputs.
-- [X] T034 \[US3\] Complete fixture-driven batch and recovery integration tests in `tests/ingest/test_batch.py`; assert sampled-frame totals equal person-excluded + no-animal + retained + failed, with no crop files/records for person-excluded or failed frames.
+- [X] T034 \[US3\] Complete fixture-driven batch and recovery integration tests in `tests/unit/ingest/test_batch.py`; assert sampled-frame totals equal person-excluded + no-animal + retained + failed, with no crop files/records for person-excluded or failed frames.
 
 **Checkpoint**: A local owner can review a complete/partial batch and safely repeat or recover it without duplicate or incomplete results.
 
@@ -109,7 +109,7 @@
 **Purpose**: Document safe operation and verify the full feature without weakening privacy or offline testability.
 
 - [X] T035 [P] Document installation/model provisioning, supported video formats, defaults, CLI examples, output safety, privacy limitations, and batch summary interpretation in `README.md` and `specs/001-ingest-videos/quickstart.md`.
-- [X] T036 Run the documented quickstart scenarios and the complete pytest, Ruff lint, and Ruff format checks from `README.md`; fix feature regressions in the corresponding `src/bird_recognition/ingest/`, `src/bird_recognition/cli.py`, and `tests/ingest/` files. Completed 2026-10-19 (owner-confirmed).
+- [X] T036 Run the documented quickstart scenarios and the complete pytest, Ruff lint, and Ruff format checks from `README.md`; fix feature regressions in the corresponding `src/bird_recognition/ingest/`, `src/bird_recognition/cli.py`, and `tests/unit/ingest/` files. Completed 2026-10-19 (owner-confirmed).
 
 ---
 
@@ -117,7 +117,7 @@
 
 ### Phase Dependencies
 
-- **Setup (Phase 1)**: T001-T003; T001 and T002 can begin in parallel, while T003 follows creation of `tests/ingest/` by T002.
+- **Setup (Phase 1)**: T001-T003; T001 and T002 can begin in parallel, while T003 follows creation of `tests/unit/ingest/` by T002.
 - **Foundational (Phase 2)**: T004-T005 depend on the package structure; both block all user stories.
 - **User Stories (Phases 3-5)**: Execute in priority order. Each story's tests are written first and should fail before its implementation begins.
 - **Polish (Phase 6)**: Depends on all selected user stories being complete.
@@ -146,10 +146,10 @@
 
 ```text
 After Phase 2, author the independent tests in parallel:
-T006 tests/ingest/test_sampling.py
-T007 tests/ingest/test_filtering.py
-T008 tests/ingest/test_crops.py
-T009 tests/ingest/test_cli.py
+T006 tests/unit/ingest/test_sampling.py
+T007 tests/unit/ingest/test_filtering.py
+T008 tests/unit/ingest/test_crops.py
+T009 tests/unit/ingest/test_cli.py
 
 Then implement independent modules in parallel:
 T010 src/bird_recognition/ingest/video.py
@@ -192,11 +192,11 @@ T014 src/bird_recognition/cli.py
 ## Phase 7: Convergence
 
 - [X] T037 Verify and record the official MegaDetector API/model format and Python 3.14 compatibility evidence for the declared PyTorch, PyAV, Pillow, and pytest constraints; retain the owner-run `uv sync` requirement per T001. Validated 2026-10-18 on Windows/Python 3.14 after owner-run sync; package versions and smoke/full-suite results are recorded in `megadetector-v6-upgrade-plan.md`.
-- [X] T038 Add fixture-driven end-to-end unchanged-rerun, changed-content/settings, and same-basename collision tests that verify output records and files, not only identity helper functions, per T026, US3/AC2-3, and SC-004. Covered by `tests/ingest/test_idempotence.py`.
-- [X] T039 Add mixed-batch and injected frame/storage-failure integration tests, including interrupted-publication recovery, absence of crop files/records for excluded or failed frames, and exact frame-outcome reconciliation, per T027, T034, US3/AC1/5, and SC-005. Covered by `tests/ingest/test_batch.py`.
-- [X] T040 Extend persisted provenance tests to verify capture-start-plus-PTS derivation, explicit unknown time/timezone, run/source/detection relationships, crop hashes/locations, frame lighting, and exact crop-region equality after reopening the manifest, per T016, T019, T025, US2/AC1-5, and SC-002. Covered by `tests/ingest/test_storage.py`.
+- [X] T038 Add fixture-driven end-to-end unchanged-rerun, changed-content/settings, and same-basename collision tests that verify output records and files, not only identity helper functions, per T026, US3/AC2-3, and SC-004. Covered by `tests/unit/ingest/test_idempotence.py`.
+- [X] T039 Add mixed-batch and injected frame/storage-failure integration tests, including interrupted-publication recovery, absence of crop files/records for excluded or failed frames, and exact frame-outcome reconciliation, per T027, T034, US3/AC1/5, and SC-005. Covered by `tests/unit/ingest/test_batch.py`.
+- [X] T040 Extend persisted provenance tests to verify capture-start-plus-PTS derivation, explicit unknown time/timezone, run/source/detection relationships, crop hashes/locations, frame lighting, and exact crop-region equality after reopening the manifest, per T016, T019, T025, US2/AC1-5, and SC-002. Covered by `tests/unit/ingest/test_storage.py`.
 - [X] T041 Validate the lighting classifier against representative verified daylight-color, infrared-night, and ambiguous fixture images rather than only uniform-color images, per T018, US2/AC4, and SC-003. Existing patterned synthetic images are not verified representative fixtures.
-- [X] T042 Add CLI assertions for partial processing failure, source/frame summaries, and exit codes 0, 1, and 2, per T028, US3/AC1/4, and FR-012. Covered by `tests/ingest/test_cli.py`.
+- [X] T042 Add CLI assertions for partial processing failure, source/frame summaries, and exit codes 0, 1, and 2, per T028, US3/AC1/4, and FR-012. Covered by `tests/unit/ingest/test_cli.py`.
 - [X] T043 After T037 is resolved and required dependencies/model are provisioned, execute the documented local CLI quickstart with a controlled safe fixture and record its outcome alongside the already-passing pytest/Ruff checks, per T036, SC-006, and plan: compatibility gate (partial).
 
 ## Phase 8: MegaDetector V6 MIT Compact Integration

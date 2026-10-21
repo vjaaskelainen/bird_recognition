@@ -13,7 +13,7 @@ from PIL import Image
 
 from bird_recognition.embed.models import EmbeddingModelRecord
 from bird_recognition.ingest.manifest import SCHEMA as INGESTION_SCHEMA
-from tests.embed.fakes import FakeModel, FakeStore, FakeStoreState
+from tests.unit.embed.fakes import FakeModel, FakeStore, FakeStoreState
 
 _TEST_DATABASE_ENV = "BIRD_RECOGNITION_TEST_DATABASE_URL"
 _SMOKE_MODEL_ENV = "BIRD_RECOGNITION_BIOCLIP_SMOKE_MODEL_DIR"

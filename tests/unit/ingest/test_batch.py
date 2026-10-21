@@ -15,7 +15,7 @@ from bird_recognition.ingest.models import (
     SampledFrame,
 )
 from bird_recognition.ingest.pipeline import run_batch
-from tests.ingest.fakes import FakeDetector, ScriptedDetector
+from tests.unit.ingest.fakes import FakeDetector, ScriptedDetector
 
 
 def test_empty_batch_reports_no_input_and_reconciled_zero_counts(

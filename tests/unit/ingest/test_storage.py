@@ -13,7 +13,7 @@ from bird_recognition.ingest.models import (
     DetectionCategory,
     StorageError,
 )
-from tests.ingest.fakes import FakeDetector
+from tests.unit.ingest.fakes import FakeDetector
 
 
 def test_manifest_reopens_with_saved_crop_location_hash_and_box(tmp_path: Path) -> None:

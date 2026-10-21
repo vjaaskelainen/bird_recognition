@@ -89,11 +89,13 @@ without schema/vector support must instead fail preflight with exit 2. Extension
 permission errors require developer/admin setup; indexing must not repair them
 silently. Do not stop/delete a database containing private results for testing.
 
-## 4. Run the offline correctness suite first
+## 4. Run the unit correctness suite first
+
+Default pytest discovery is limited to `tests/unit`, so this single command runs
+all unit tests without collecting smoke or real-database tests.
 
 ```powershell
 .\.venv\Scripts\python.exe -m pytest
-.\.venv\Scripts\python.exe -m pytest tests\embed
 ```
 
 Expected: no model downloads, DB connection or network in the standard suite;
@@ -172,7 +174,7 @@ Have the developer provision a dedicated disposable local test database and set
 at the private production database. With explicit test opt-in:
 
 ```powershell
-.\.venv\Scripts\python.exe -m pytest tests\embed\test_storage_integration.py
+.\.venv\Scripts\python.exe -m pytest tests\integration
 ```
 
 Expected: real pgvector roundtrip, schema/vector preflight errors, dimensional and
@@ -185,7 +187,7 @@ For optional local-model smoke validation, set
 `BIRD_RECOGNITION_BIOCLIP_SMOKE_IMAGE` to reviewed external files, then:
 
 ```powershell
-.\.venv\Scripts\python.exe -m pytest tests\embed\test_bioclip_smoke.py
+.\.venv\Scripts\python.exe -m pytest tests\smoke\test_bioclip_smoke.py
 ```
 
 Expected: no network requests; finite normalized 512-vector and candidate scores.

@@ -102,8 +102,22 @@ src/bird_recognition/
     ├── pipeline.py         # preflight, reuse, per-crop work, run outcomes
     └── evaluation.py       # persisted-decision metrics, no inference
 tests/
-├── ingest/                 # regression suite
-└── embed/
+├── unit/
+│   ├── ingest/              # ingestion unit/regression suite
+│   ├── embed/               # embedding unit suite
+│   └── test_package.py
+├── smoke/
+│   ├── test_detection_smoke.py
+│   └── test_bioclip_smoke.py
+└── integration/
+    └── embed/                # opt-in real PostgreSQL integration tests
+        └── test_storage_integration.py
+```
+
+The embedding unit suite contains:
+
+```text
+tests/unit/embed/
     ├── conftest.py
     ├── fakes.py
     ├── test_config.py
@@ -113,9 +127,7 @@ tests/
     ├── test_pipeline.py
     ├── test_retry.py
     ├── test_cli.py
-    ├── test_evaluation.py
-    ├── test_storage_integration.py
-    └── test_bioclip_smoke.py
+    └── test_evaluation.py
 ```
 
 **Structure Decision**: Add an `embed` sibling of `ingest`, with small model/store

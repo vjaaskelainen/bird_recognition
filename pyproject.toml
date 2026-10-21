@@ -36,6 +36,7 @@ dev = [
 ]
 
 [tool.pytest.ini_options]
+testpaths = ["tests/unit"]
 markers = [
     "real_database: requires explicit opt-in to a disposable local database",
     "local_model: requires explicit opt-in to local model assets",

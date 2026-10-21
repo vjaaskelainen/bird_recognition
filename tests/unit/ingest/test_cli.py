@@ -14,7 +14,7 @@ from bird_recognition.ingest.models import (
     DetectionCategory,
     SampledFrame,
 )
-from tests.ingest.fakes import FakeDetector, ScriptedDetector
+from tests.unit.ingest.fakes import FakeDetector, ScriptedDetector
 
 
 def test_ingest_cli_uses_dotenv_defaults_and_cli_overrides(

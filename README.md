@@ -157,12 +157,15 @@ The first command must print the interpreter path inside this repository's
 
 Tests use local fixtures and temporary directories; they do not require `.env`,
 PostgreSQL, Ollama, network access, or MegaDetector weights. The real-model
-smoke test is skipped unless all three `BIRD_RECOGNITION_SMOKE_MODEL`,
+smoke test requires all three `BIRD_RECOGNITION_SMOKE_MODEL`,
 `BIRD_RECOGNITION_SMOKE_CONFIG`, and `BIRD_RECOGNITION_SMOKE_IMAGE` values are
 set (for example in `.env`); the paths must point to locally available files.
-With those configured, the smoke test runs as part of the full suite. To run a
-single test file, pass its path, such as `python -m pytest
-tests/ingest/test_detection.py`.
+The default `python -m pytest` runs only `tests/unit`. Run smoke and integration
+tests separately with `python -m pytest tests/smoke` and
+`python -m pytest tests/integration`. Smoke tests need the listed local model/image
+settings; integration tests need `BIRD_RECOGNITION_TEST_DATABASE_URL` set to an
+approved disposable local database. To run one unit test file, pass its path, such
+as `python -m pytest tests/unit/ingest/test_detection.py`.
 
 ```powershell
 # Check for lint issues
