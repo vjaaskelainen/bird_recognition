@@ -3,8 +3,8 @@
 **Status**: US1–US3 commands and offline correctness contracts are implemented.
 The developer reports all 8 opted-in PostgreSQL integration test cases passed
 against the disposable smoke-test database using the repository's `pyproject.toml`
-pytest configuration. The installed-wheel, full acceptance-matrix, provisioned-model,
-and biological-quality gates remain pending.
+pytest configuration, and the built wheel exposes its migration resource. The full
+acceptance matrix, provisioned-model, and biological-quality gates remain pending.
 
 Run all commands from `C:\code\bird_recognition` in PowerShell 5.1. Use the
 existing `.venv`; if absent, stop and ask the developer. Do not activate it.
@@ -186,8 +186,14 @@ the disposable smoke-test database using the repository's `pyproject.toml` pytes
 configuration. This completes T035's real persistence/recovery test run. Database
 URLs and credentials are intentionally not recorded. The run does not by itself
 complete T013's full listed test-coverage requirements or T049's 100-crop/retry/
-retag/99-plus-1/preflight matrix and installed-wheel resource check. A skipped test
-is not a passed persistence boundary.
+retag/99-plus-1/preflight matrix. A skipped test is not a passed persistence boundary.
+
+The developer also reports a successful wheel build at
+`%TEMP%\bird-recognition-wheel-check\bird_recognition-0.1.0-py3-none-any.whl` and
+a successful `importlib.resources` read of
+`bird_recognition/embed/migrations/001_initial.sql` from that wheel. This verifies
+the packaged migration resource (T003/T015); it does not complete T049's remaining
+acceptance matrix.
 
 For optional local-model smoke validation, set
 `BIRD_RECOGNITION_BIOCLIP_SMOKE_MODEL_DIR` and

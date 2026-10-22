@@ -30,6 +30,7 @@ bird-recognition = "bird_recognition.cli:main"
 [dependency-groups]
 dev = [
     "pre-commit>=4.0",
+    "hatchling",
     "ruff>=0.11",
     "copier>=9.10",
     "pytest>=9.1.1,<10",
@@ -45,8 +46,6 @@ markers = [
 [tool.hatch.build.targets.wheel]
 packages = ["src/bird_recognition"]
 
-[tool.hatch.build.targets.wheel.force-include]
-"src/bird_recognition/embed/migrations" = "bird_recognition/embed/migrations"
 
 [tool.ruff]
 line-length = 88
