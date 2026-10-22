@@ -95,7 +95,7 @@
 ### Tests for User Story 3
 
 - [x] T034 [P] [US3] Extend tests/unit/embed/test_retry.py for 100-skip unchanged repeats, newly unreadable completed inputs failing rather than skipping, interruption after N commits, stale-run recovery, vector/decision rollback, retag write failure preserving earlier vectors, pending remainder, fatal shared-model/storage stop and lost-acknowledgement reconciliation with zero duplicate durable results.
-- [ ] T035 [P] [US3] Extend tests/integration/embed/test_storage_integration.py with concurrent-writer rejection, lock release on connection death, restart/stale-run recovery, connection loss before/during commit and lost-acknowledgement fault injection around a real PostgreSQL commit; prove committed-only local counts, atomic durable counters/item references and durable lookup on retry instead of substitute-only assertions.
+- [x] T035 [P] [US3] Extend tests/integration/embed/test_storage_integration.py with concurrent-writer rejection, lock release on connection death, restart/stale-run recovery, connection loss before/during commit and lost-acknowledgement fault injection around a real PostgreSQL commit; prove committed-only local counts, atomic durable counters/item references and durable lookup on retry instead of substitute-only assertions.
 - [x] T036 [P] [US3] Write label/metric/report tests in tests/unit/embed/test_evaluation.py for strict JSON schemas, duplicate/unknown fields/keys/IDs, mismatched run IDs, exact species candidate membership, out-of-list/unidentifiable truth, empty/subset labels, skipped decisions, failed/pending versus unknown, unlabeled count, all lighting groups/zero denominators, 10-day/10-night gate and external no-overwrite atomic output; use hand-calculated examples, not fabricated quality claims.
 - [x] T037 [P] [US3] Extend tests/unit/embed/test_cli.py for interrupted/partial/fatal/unconfirmed summary envelopes, stable failure codes and durable_status_confirmed, evaluate-species option/read/validation exits, read-only evaluation with absent model/species/crops, private report path rejection and valid low-quality reports returning success.
 
@@ -206,7 +206,7 @@ All examples assume preceding phase/gates and common fixtures are complete; test
 - Task inventory: **51 tasks** — Setup 3, Foundation 7, US1 15, US2 8, US3 10, Polish/Acceptance 8.
 - Independent test criteria appear in each story phase; all story tasks carry exactly one US label and all tasks name concrete paths.
 - Mark tasks complete only after evidence is available. Do not run implementation as part of generating this document.
-- US3 offline tests and implementation are complete. T035 remains unchecked: its real PostgreSQL tests were collected but skipped because `BIRD_RECOGNITION_TEST_DATABASE_URL` was not provided; the real persistence boundary is not claimed as proven.
+- US3 offline tests and implementation are complete. The developer reports all 8 real PostgreSQL integration test cases passed against the disposable smoke-test database using the repository's `pyproject.toml` pytest configuration; no database URL or credentials are recorded. T035 is complete. T013 remains unchecked pending its full listed coverage, and T049 remains unchecked pending the rest of the acceptance matrix and installed-wheel resource check.
 
 [US1]: spec.md#user-story-1---index-and-identify-ingested-crops-priority-p1
 [US2]: spec.md#user-story-2---control-the-candidate-species-priority-p2

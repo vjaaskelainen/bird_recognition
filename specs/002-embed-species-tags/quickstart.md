@@ -1,8 +1,10 @@
 # Quickstart: Validate Crop Embeddings and Species Tags
 
 **Status**: US1–US3 commands and offline correctness contracts are implemented.
-Real PostgreSQL, installed-wheel, provisioned-model, and biological-quality
-acceptance gates remain pending; skipped boundary tests are not proof.
+The developer reports all 8 opted-in PostgreSQL integration test cases passed
+against the disposable smoke-test database using the repository's `pyproject.toml`
+pytest configuration. The installed-wheel, full acceptance-matrix, provisioned-model,
+and biological-quality gates remain pending.
 
 Run all commands from `C:\code\bird_recognition` in PowerShell 5.1. Use the
 existing `.venv`; if absent, stop and ask the developer. Do not activate it.
@@ -179,10 +181,13 @@ at the private production database. With explicit test opt-in:
 .\.venv\Scripts\python.exe -m pytest tests\integration
 ```
 
-Expected: real pgvector roundtrip, schema/vector preflight errors, dimensional and
-unique constraints, atomic rollback, restart recovery, concurrent writer lock and
-connection-loss handling pass. Run before feature acceptance; a skipped test is
-not a passed persistence boundary.
+Recorded result (developer-reported): all 8 integration test cases passed against
+the disposable smoke-test database using the repository's `pyproject.toml` pytest
+configuration. This completes T035's real persistence/recovery test run. Database
+URLs and credentials are intentionally not recorded. The run does not by itself
+complete T013's full listed test-coverage requirements or T049's 100-crop/retry/
+retag/99-plus-1/preflight matrix and installed-wheel resource check. A skipped test
+is not a passed persistence boundary.
 
 For optional local-model smoke validation, set
 `BIRD_RECOGNITION_BIOCLIP_SMOKE_MODEL_DIR` and
