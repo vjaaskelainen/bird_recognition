@@ -217,7 +217,7 @@ class PgVectorStore:
                 ).fetchone()
                 if row is None:
                     return None
-                embedding = tuple(float(value) for value in row[3])
+                embedding = tuple(float(value) for value in row[3].to_list())
                 _validate_embedding(embedding)
                 return CropRepresentation(
                     representation_id=row[0],
@@ -835,7 +835,7 @@ class PgVectorStore:
                 representation.representation_id,
                 representation.snapshot_id,
                 representation.model_fingerprint,
-                Vector(representation.embedding),
+                Vector(list(representation.embedding)),
                 representation.processed_at,
                 representation.created_run_id,
             ),
@@ -849,7 +849,7 @@ class PgVectorStore:
         ).fetchone()
         if existing is None:
             raise StorageError("conflicting representation could not be reconciled")
-        existing_embedding = tuple(existing[1])
+        existing_embedding = tuple(float(value) for value in existing[1].to_list())
         _validate_embedding(existing_embedding)
         if any(
             abs(actual - expected) > 1e-5
