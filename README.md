@@ -88,17 +88,28 @@ them private and review them before sharing.
 
 ## Local database
 
-Start the local Postgres + pgvector service with Podman Compose:
+Start the local Postgres + pgvector service and wait for database migrations to
+finish with Podman Compose:
 
 ```powershell
-podman compose up -d
+podman compose up -d --build --wait
 ```
 
-The default connection is `postgresql://bird_recognition:bird_recognition@localhost:5432/bird_recognition`.
-Compose reads the `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD`, and
-`POSTGRES_PORT` values from `.env` (with the same defaults shown in
-`.env.example`). Enable the vector extension in the database before using it
-with `CREATE EXTENSION IF NOT EXISTS vector;`.
+Compose waits for PostgreSQL, then a lightweight migration service applies any
+pending numbered SQL migrations and stays healthy only while the database is at
+the packaged migration head. Existing migrations are skipped, including on
+stop/start; future migrations are applied on the next `up`. The persistent volume
+preserves the database across `podman compose down` and restarts. Do not use
+`podman compose down -v` unless intentionally deleting the database.
+
+Compose reads `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD`, and
+`POSTGRES_PORT` from `.env` (with defaults in `.env.example`). The migration
+service also creates the pgvector extension when needed. The default application
+connection is
+`postgresql://bird_recognition:bird_recognition@localhost:5432/bird_recognition`;
+set `BIRD_RECOGNITION_DATABASE_URL` privately when your local credentials differ.
+For explicit/manual setup, `bird-recognition database-init` applies the same
+pending migrations.
 
 ## AI-assisted development
 

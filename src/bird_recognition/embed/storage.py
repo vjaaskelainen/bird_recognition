@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import importlib.resources
 import json
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
@@ -18,6 +17,10 @@ from psycopg.types.json import Jsonb
 from bird_recognition.embed.config import (
     sanitize_error,
     validate_local_database_url,
+)
+from bird_recognition.embed.migrate import (
+    apply_pending_migrations,
+    latest_migration_version,
 )
 from bird_recognition.embed.models import (
     CandidateScore,
@@ -41,7 +44,6 @@ from bird_recognition.embed.models import (
 from bird_recognition.embed.scoring import validate_decision
 
 _ADVISORY_LOCK_KEY = 0x4252495244454D42
-_MIGRATION = "migrations/001_initial.sql"
 
 
 @dataclass(frozen=True, slots=True)
@@ -656,7 +658,7 @@ class PgVectorStore:
             raise StorageError(
                 "schema_mismatch: schema version record is unavailable"
             ) from None
-        if version is None or version[0] != 1:
+        if version is None or version[0] != latest_migration_version():
             raise StorageError("schema_mismatch: unsupported database schema version")
         extension = connection.execute(
             "SELECT EXISTS (SELECT 1 FROM pg_extension WHERE extname='vector')"
@@ -961,24 +963,17 @@ class PgVectorStore:
 
 
 def initialize_database(database_url: str) -> DatabaseInitResult:
-    """Explicitly create pgvector and install schema version 1 transactionally."""
+    """Apply pending packaged migrations and verify the resulting schema."""
     validate_local_database_url(database_url)
     try:
-        with psycopg.connect(database_url) as connection:
-            exists = connection.execute(
-                "SELECT EXISTS (SELECT 1 FROM pg_namespace WHERE nspname='bird_embed')"
-            ).fetchone()[0]
-            if exists:
-                PgVectorStore._preflight_connection(connection)
-                return DatabaseInitResult(1, True, False)
-            connection.execute("CREATE EXTENSION IF NOT EXISTS vector")
-            sql = (
-                importlib.resources.files("bird_recognition.embed")
-                .joinpath(_MIGRATION)
-                .read_text(encoding="utf-8")
+        with psycopg.connect(database_url, autocommit=True) as connection:
+            result = apply_pending_migrations(connection)
+            PgVectorStore._preflight_connection(connection)
+            return DatabaseInitResult(
+                result.version,
+                True,
+                bool(result.applied_versions),
             )
-            connection.execute(sql, prepare=False)
-            return DatabaseInitResult(1, True, True)
     except StorageError:
         raise
     except Exception as error:

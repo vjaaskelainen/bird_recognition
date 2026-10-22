@@ -15,7 +15,7 @@ See [CLI contract](contracts/cli.md) for all options/formats and
   Before implementation, verify OpenCLIP/torchvision compatibility with the existing
   torch constraints and psycopg/pgvector support. Follow repository dependency
   approval/developer-sync policy; do not hand-edit `uv.lock` or downgrade Python.
-- Docker/Compose and local PostgreSQL 17 pgvector service from `compose.yaml`.
+- Podman Compose and local PostgreSQL 17 pgvector service from `compose.yaml`.
 - An ingestion output tree containing `manifest.sqlite3` and retained crops; keep
   ingestion idle while the index command captures its read-only metadata snapshot.
   The SQLite snapshot closes before crop inference begins. No video re-ingestion is
@@ -75,19 +75,21 @@ Optional indexing defaults: `BIRD_RECOGNITION_BIOCLIP_MODEL_DIR`,
 `BIRD_RECOGNITION_SPECIES_LIST`, `BIRD_RECOGNITION_SPECIES_THRESHOLD` (0.5).
 CLI overrides process environment, which overrides `.env`, then built-ins.
 
-After explicit approval for service/schema setup, run:
+Set the Compose credentials in the ignored local `.env` file if changing the
+defaults. Start the database and wait until the migration service reports ready:
 
 ```powershell
-docker compose up -d postgres
-docker compose ps
-.\.venv\Scripts\uv.exe run bird-recognition database-init --json
+podman compose up -d --build --wait
+podman compose ps
 ```
 
-Expected: healthy local service; extension/schema initialized transactionally with
-schema/version response. Repeat initialization: no destructive changes. Indexing
-without schema/vector support must instead fail preflight with exit 2. Extension
-permission errors require developer/admin setup; indexing must not repair them
-silently. Do not stop/delete a database containing private results for testing.
+Compose waits for PostgreSQL, then applies only migrations newer than the stored
+schema version. Starting an initialized volume does not reapply completed
+migrations; future numbered SQL files are applied on the next `up`. The
+`database-init` CLI applies the same migrations for explicit/manual setup, while
+`index` remains read-only with respect to schema setup and fails preflight with
+exit 2 when the database is not ready. Do not run `podman compose down -v` unless
+intentionally deleting the database and its private results.
 
 ## 4. Run the unit correctness suite first
 

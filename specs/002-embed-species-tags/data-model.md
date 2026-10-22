@@ -16,7 +16,9 @@
   ranges/dimensions/nonzero norms in database constraints where applicable;
   PostgreSQL NaN must be explicitly rejected, not only checked against a lower bound.
 - Database schema lives in `bird_embed`, with an explicit schema-version record.
-  Application schema version mismatch is preflight failure, not auto-migration.
+  Compose startup and the explicit `database-init` command apply only pending
+  packaged SQL migrations; indexing never migrates. A schema version newer than
+  the packaged migration head or an invalid history is a non-destructive failure.
 
 ## 1. IngestedCropSnapshot (`crop_snapshot`)
 

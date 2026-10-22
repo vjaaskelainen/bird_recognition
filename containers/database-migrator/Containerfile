@@ -1,0 +1,13 @@
+FROM python:3.14-slim
+
+WORKDIR /app
+ENV PYTHONPATH=/app PYTHONDONTWRITEBYTECODE=1
+
+RUN python -m pip install --no-cache-dir "psycopg[binary]==3.3.6"
+
+COPY src/bird_recognition/__init__.py /app/bird_recognition/__init__.py
+COPY src/bird_recognition/embed /app/bird_recognition/embed
+
+USER 10001:10001
+
+ENTRYPOINT ["python", "-m", "bird_recognition.embed.migrate"]

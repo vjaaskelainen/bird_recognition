@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 from dataclasses import replace
 from datetime import UTC, datetime
+from importlib.resources import files
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
@@ -18,6 +19,7 @@ from bird_recognition.embed.config import (
     load_species_candidates,
     validate_local_database_url,
 )
+from bird_recognition.embed.migrate import apply_pending_migrations
 from bird_recognition.embed.models import (
     CropRepresentation,
     EmbeddingModelRecord,
@@ -108,6 +110,32 @@ def test_database_init_is_transactional_and_idempotent(
     assert first.vector_available
     assert first.changes_applied
     assert not second.changes_applied
+
+
+@pytest.mark.real_database
+def test_migration_runner_applies_only_missing_revisions(
+    disposable_embed_schema: str, tmp_path: Path
+) -> None:
+    initialize_database(disposable_embed_schema)
+    initial_migration = files("bird_recognition.embed").joinpath(
+        "migrations", "001_initial.sql"
+    )
+    (tmp_path / "001_initial.sql").write_text(
+        initial_migration.read_text(encoding="utf-8"), encoding="utf-8"
+    )
+    (tmp_path / "002_test_marker.sql").write_text(
+        "CREATE TABLE bird_embed.migration_002_test_marker (id integer PRIMARY KEY);",
+        encoding="utf-8",
+    )
+
+    with psycopg.connect(disposable_embed_schema, autocommit=True) as connection:
+        first = apply_pending_migrations(connection, tmp_path)
+        second = apply_pending_migrations(connection, tmp_path)
+
+    assert first.version == 2
+    assert first.applied_versions == (2,)
+    assert second.version == 2
+    assert second.applied_versions == ()
 
 
 @pytest.mark.real_database

@@ -15,5 +15,28 @@ services:
       timeout: 5s
       retries: 5
 
+  database-migrations:
+    build:
+      context: .
+      dockerfile: containers/database-migrator/Containerfile
+    environment:
+      PGHOST: postgres
+      PGPORT: 5432
+      PGDATABASE: ${POSTGRES_DB:-bird_recognition}
+      PGUSER: ${POSTGRES_USER:-bird_recognition}
+      PGPASSWORD: ${POSTGRES_PASSWORD:-bird_recognition}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./src/bird_recognition/embed/migrations:/app/bird_recognition/embed/migrations:ro
+    healthcheck:
+      test: ["CMD", "python", "-m", "bird_recognition.embed.migrate", "--check"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 5s
+    restart: unless-stopped
+
 volumes:
   postgres_data:
