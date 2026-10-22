@@ -1,18 +1,21 @@
 from __future__ import annotations
 
 import os
+import secrets
 from dataclasses import replace
 from datetime import UTC, datetime
 from importlib.resources import files
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlsplit
-from uuid import uuid4
+from urllib.parse import quote, urlsplit, urlunsplit
+from uuid import UUID, uuid4
 
 import psycopg
 import pytest
 from pgvector import Vector
 from pgvector.psycopg import register_vector
+from psycopg.sql import SQL, Identifier, Literal
+from psycopg.types.json import Jsonb
 
 from bird_recognition.embed.config import (
     build_tagging_config,
@@ -23,6 +26,7 @@ from bird_recognition.embed.migrate import apply_pending_migrations
 from bird_recognition.embed.models import (
     CropRepresentation,
     EmbeddingModelRecord,
+    EmbedValidationError,
     IngestedCropSnapshot,
     Lighting,
     ProcessingRun,
@@ -79,6 +83,27 @@ class _ConnectionWithLostCommitAcknowledgement:
         return getattr(self._connection, name)
 
 
+class _ConnectionWithFailureAfterStatement:
+    def __init__(self, connection: Any, statement: str) -> None:
+        self._connection = connection
+        self._statement = statement
+        self._failed = False
+
+    def transaction(self) -> Any:
+        return self._connection.transaction()
+
+    def execute(self, query: Any, *args: Any, **kwargs: Any) -> Any:
+        result = self._connection.execute(query, *args, **kwargs)
+        if not self._failed and self._statement in str(query):
+            self._failed = True
+            self._connection.close()
+            raise psycopg.OperationalError("simulated connection loss during write")
+        return result
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._connection, name)
+
+
 @pytest.fixture
 def database_url() -> str:
     value = os.environ.get("BIRD_RECOGNITION_TEST_DATABASE_URL")
@@ -97,6 +122,78 @@ def disposable_embed_schema(database_url: str) -> str:
     yield database_url
     with psycopg.connect(database_url, autocommit=True) as connection:
         connection.execute("DROP SCHEMA IF EXISTS bird_embed CASCADE")
+
+
+def _drop_temporary_test_roles(connection: psycopg.Connection[Any]) -> None:
+    roles = connection.execute(
+        "SELECT rolname FROM pg_roles WHERE rolname LIKE 'bird_embed_test_%'"
+    ).fetchall()
+    for (role_name,) in roles:
+        role = Identifier(role_name)
+        connection.execute(SQL("DROP OWNED BY {}").format(role))
+        connection.execute(
+            SQL("REVOKE CONNECT ON DATABASE {} FROM {}").format(
+                Identifier(connection.info.dbname), role
+            )
+        )
+        connection.execute(SQL("DROP ROLE IF EXISTS {}").format(role))
+
+
+def _insert_representation_prerequisites(
+    connection: psycopg.Connection[Any],
+) -> tuple[str, str, str, UUID]:
+    now = datetime.now(UTC)
+    model_fingerprint = "a" * 64
+    candidate_fingerprint = "b" * 64
+    config_fingerprint = "c" * 64
+    snapshot_id = "d" * 64
+    run_id = uuid4()
+    connection.execute(
+        "INSERT INTO bird_embed.embedding_model "
+        "(model_fingerprint,upstream_name,upstream_revision,checkpoint_sha256,"
+        "config_sha256,tokenizer_sha256,architecture,dimension,preprocessing_json,"
+        "tokenizer_json,adapter_version,runtime_json,logit_scale,canonical_json) "
+        "VALUES (%s,'test','revision',%s,%s,%s,'ViT-B-16',512,'{}','{}','test',"
+        "'{}',1,'{}')",
+        (model_fingerprint, "1" * 64, "2" * 64, "3" * 64),
+    )
+    connection.execute(
+        "INSERT INTO bird_embed.candidate_set "
+        "(candidate_set_fingerprint,schema_version,candidates_json,canonical_json) "
+        'VALUES (%s,1,\'[{"id":"bird","name":"Bird"}]\',\'{}\')',
+        (candidate_fingerprint,),
+    )
+    connection.execute(
+        "INSERT INTO bird_embed.tagging_config "
+        "(config_fingerprint,model_fingerprint,candidate_set_fingerprint,"
+        "scoring_fingerprint,prompt_template,prompt_version,effective_logit_scale,"
+        "scoring_json,threshold,canonical_json) "
+        "VALUES (%s,%s,%s,%s,'a photo of {name}.','species-photo-v1',1,'{}',0.5,'{}')",
+        (config_fingerprint, model_fingerprint, candidate_fingerprint, "e" * 64),
+    )
+    connection.execute(
+        "INSERT INTO bird_embed.processing_run "
+        "(run_id,started_at,status,config_fingerprint,manifest_locator,"
+        "selection_fingerprint,selected_count,completed_count,skipped_count,"
+        "failed_count,assigned_count,unknown_count,failures_json,"
+        "sanitized_settings_json) "
+        "VALUES (%s,%s,'running',%s,'manifest',%s,0,0,0,0,0,0,'[]','{}')",
+        (run_id, now, config_fingerprint, "f" * 64),
+    )
+    connection.execute(
+        "INSERT INTO bird_embed.crop_snapshot "
+        "(snapshot_id,crop_id,provenance_sha256,crop_sha256,source_id,"
+        "source_content_sha256,source_original_path,source_basename,"
+        "ingest_settings_fingerprint,ingestion_run_id,frame_number,elapsed_seconds,"
+        "detection_id,detection_category,detection_confidence,"
+        "detection_box_normalized,crop_box_pixels,frame_width,frame_height,"
+        "crop_original_image_path,lighting,imported_at) "
+        "VALUES (%s,'crop',%s,%s,'source',%s,'source.mp4','source.mp4',%s,'ingest',"
+        "0,0,'detection','animal',0.9,'[0.1,0.1,0.9,0.9]','[0,0,20,20]',"
+        "20,20,'crop.png','unknown',%s)",
+        (snapshot_id, "4" * 64, "5" * 64, "6" * 64, "7" * 64, now),
+    )
+    return snapshot_id, model_fingerprint, config_fingerprint, run_id
 
 
 @pytest.mark.real_database
@@ -139,6 +236,81 @@ def test_migration_runner_applies_only_missing_revisions(
 
 
 @pytest.mark.real_database
+def test_storage_preflight_rejects_missing_schema(disposable_embed_schema: str) -> None:
+    with pytest.raises(StorageError, match="schema_mismatch"):
+        PgVectorStore(disposable_embed_schema).preflight()
+
+
+@pytest.mark.real_database
+def test_storage_preflight_rejects_insufficient_table_permissions(
+    disposable_embed_schema: str,
+) -> None:
+    initialize_database(disposable_embed_schema)
+    role_name = f"bird_embed_test_{uuid4().hex}"
+    password = secrets.token_urlsafe(32)
+    with psycopg.connect(disposable_embed_schema, autocommit=True) as connection:
+        _drop_temporary_test_roles(connection)
+        can_create_role = connection.execute(
+            "SELECT rolsuper OR rolcreaterole FROM pg_roles WHERE rolname=current_user"
+        ).fetchone()[0]
+        if not can_create_role:
+            pytest.skip("database account cannot create a disposable restricted role")
+        connection.execute(
+            SQL("CREATE ROLE {} LOGIN PASSWORD {}").format(
+                Identifier(role_name), Literal(password)
+            )
+        )
+        try:
+            connection.execute(
+                SQL("GRANT CONNECT ON DATABASE {} TO {}").format(
+                    Identifier(connection.info.dbname), Identifier(role_name)
+                )
+            )
+            connection.execute(
+                SQL("GRANT USAGE ON SCHEMA bird_embed TO {}").format(
+                    Identifier(role_name)
+                )
+            )
+            connection.execute(
+                SQL("GRANT SELECT ON ALL TABLES IN SCHEMA bird_embed TO {}").format(
+                    Identifier(role_name)
+                )
+            )
+            connection.execute(
+                SQL("REVOKE SELECT ON bird_embed.crop_snapshot FROM {}").format(
+                    Identifier(role_name)
+                )
+            )
+            parsed_url = urlsplit(disposable_embed_schema)
+            host = parsed_url.hostname
+            authority_host = f"[{host}]" if host and ":" in host else host
+            port = f":{parsed_url.port}" if parsed_url.port else ""
+            restricted_url = urlunsplit(
+                (
+                    parsed_url.scheme,
+                    f"{quote(role_name, safe='')}:{quote(password, safe='')}@"
+                    f"{authority_host}{port}",
+                    parsed_url.path,
+                    parsed_url.query,
+                    parsed_url.fragment,
+                )
+            )
+            with pytest.raises(StorageError, match="permissions"):
+                PgVectorStore(restricted_url).preflight(read_only=True)
+        finally:
+            connection.execute(SQL("DROP OWNED BY {}").format(Identifier(role_name)))
+            connection.execute(
+                SQL("REVOKE CONNECT ON DATABASE {} FROM {}").format(
+                    Identifier(connection.info.dbname), Identifier(role_name)
+                )
+            )
+            connection.execute(SQL("DROP OWNED BY {}").format(Identifier(role_name)))
+            connection.execute(
+                SQL("DROP ROLE IF EXISTS {}").format(Identifier(role_name))
+            )
+
+
+@pytest.mark.real_database
 def test_storage_preflight_rejects_unknown_schema_version(
     disposable_embed_schema: str,
 ) -> None:
@@ -149,6 +321,21 @@ def test_storage_preflight_rejects_unknown_schema_version(
         )
 
     with pytest.raises(StorageError):
+        PgVectorStore(disposable_embed_schema).preflight()
+
+
+@pytest.mark.real_database
+def test_storage_preflight_rejects_incompatible_vector_dimension(
+    disposable_embed_schema: str,
+) -> None:
+    initialize_database(disposable_embed_schema)
+    with psycopg.connect(disposable_embed_schema) as connection:
+        connection.execute(
+            "ALTER TABLE bird_embed.crop_representation "
+            "ALTER COLUMN embedding TYPE vector(511) USING embedding::vector(511)"
+        )
+
+    with pytest.raises(StorageError, match="dimension"):
         PgVectorStore(disposable_embed_schema).preflight()
 
 
@@ -169,6 +356,225 @@ def test_pgvector_roundtrips_normalized_512_float_vector(
     assert len(vector_values) == 512
     assert vector_values[0] == pytest.approx(1.0)
     assert sum(value * value for value in vector_values) == pytest.approx(1.0, abs=1e-6)
+
+
+@pytest.mark.real_database
+@pytest.mark.parametrize(
+    ("values", "expected_error"),
+    [
+        ((0.0,) * 512, True),
+        ((2.0,) + (0.0,) * 511, True),
+        ((float("nan"),) + (0.0,) * 511, True),
+        ((float("inf"),) + (0.0,) * 511, True),
+        ((1.0,) + (0.0,) * 510, True),
+        ((1.0,) + (0.0,) * 511, False),
+    ],
+)
+def test_representation_rejects_invalid_embedding_values(
+    disposable_embed_schema: str,
+    values: tuple[float, ...],
+    expected_error: bool,
+) -> None:
+    initialize_database(disposable_embed_schema)
+    with psycopg.connect(disposable_embed_schema) as connection:
+        register_vector(connection)
+        snapshot_id, model_fingerprint, _, run_id = (
+            _insert_representation_prerequisites(connection)
+        )
+        statement = (
+            "INSERT INTO bird_embed.crop_representation "
+            "(representation_id,snapshot_id,model_fingerprint,embedding,processed_at,"
+            "created_run_id) VALUES (%s,%s,%s,%s,%s,%s)"
+        )
+        parameters = (
+            uuid4(),
+            snapshot_id,
+            model_fingerprint,
+            Vector(list(values)),
+            datetime.now(UTC),
+            run_id,
+        )
+        if expected_error:
+            with pytest.raises(psycopg.Error):
+                with connection.transaction():
+                    connection.execute(statement, parameters)
+        else:
+            connection.execute(statement, parameters)
+
+
+@pytest.mark.real_database
+def test_representation_uniqueness_is_enforced_by_database(
+    disposable_embed_schema: str,
+) -> None:
+    initialize_database(disposable_embed_schema)
+    now = datetime.now(UTC)
+    with psycopg.connect(disposable_embed_schema) as connection:
+        register_vector(connection)
+        snapshot_id, model_fingerprint, _, run_id = (
+            _insert_representation_prerequisites(connection)
+        )
+        statement = (
+            "INSERT INTO bird_embed.crop_representation "
+            "(representation_id,snapshot_id,model_fingerprint,embedding,processed_at,"
+            "created_run_id) VALUES (%s,%s,%s,%s,%s,%s)"
+        )
+        vector = Vector([1.0] + [0.0] * 511)
+        connection.execute(
+            statement, (uuid4(), snapshot_id, model_fingerprint, vector, now, run_id)
+        )
+        with pytest.raises(psycopg.errors.UniqueViolation):
+            with connection.transaction():
+                connection.execute(
+                    statement,
+                    (uuid4(), snapshot_id, model_fingerprint, vector, now, run_id),
+                )
+
+
+@pytest.mark.real_database
+def test_decision_uniqueness_is_enforced_by_database(
+    disposable_embed_schema: str,
+) -> None:
+    initialize_database(disposable_embed_schema)
+    now = datetime.now(UTC)
+    with psycopg.connect(disposable_embed_schema) as connection:
+        register_vector(connection)
+        snapshot_id, model_fingerprint, config_fingerprint, run_id = (
+            _insert_representation_prerequisites(connection)
+        )
+        representation_id = uuid4()
+        connection.execute(
+            "INSERT INTO bird_embed.crop_representation "
+            "(representation_id,snapshot_id,model_fingerprint,embedding,processed_at,"
+            "created_run_id) VALUES (%s,%s,%s,%s,%s,%s)",
+            (
+                representation_id,
+                snapshot_id,
+                model_fingerprint,
+                Vector([1.0] + [0.0] * 511),
+                now,
+                run_id,
+            ),
+        )
+        statement = (
+            "INSERT INTO bird_embed.species_decision "
+            "(decision_id,representation_id,config_fingerprint,assigned_species_id,"
+            "best_candidate_id,confidence,tied_candidate_ids,candidate_scores_json,"
+            "reason,warnings_json,processed_at,created_run_id) "
+            "VALUES (%s,%s,%s,'bird','bird',1,'[]',"
+            '\'[{"id":"bird","logit":1,"score":1}]\','
+            "'assigned','[]',%s,%s)"
+        )
+        connection.execute(
+            statement, (uuid4(), representation_id, config_fingerprint, now, run_id)
+        )
+        with pytest.raises(psycopg.errors.UniqueViolation):
+            with connection.transaction():
+                connection.execute(
+                    statement,
+                    (uuid4(), representation_id, config_fingerprint, now, run_id),
+                )
+
+
+@pytest.mark.real_database
+@pytest.mark.parametrize(
+    ("table", "columns", "values"),
+    [
+        (
+            "candidate_set",
+            "candidate_set_fingerprint,schema_version,candidates_json,canonical_json",
+            ("a" * 64, 1, Jsonb([]), Jsonb({})),
+        ),
+        (
+            "tagging_config",
+            "config_fingerprint,model_fingerprint,candidate_set_fingerprint,"
+            "scoring_fingerprint,prompt_template,prompt_version,effective_logit_scale,"
+            "scoring_json,threshold,canonical_json",
+            (
+                "b" * 64,
+                "a" * 64,
+                "b" * 64,
+                "f" * 64,
+                "a photo of {name}.",
+                "species-photo-v1",
+                1.0,
+                Jsonb({}),
+                1.5,
+                Jsonb({}),
+            ),
+        ),
+    ],
+)
+def test_candidate_and_configuration_constraints_reject_invalid_records(
+    disposable_embed_schema: str,
+    table: str,
+    columns: str,
+    values: tuple[Any, ...],
+) -> None:
+    initialize_database(disposable_embed_schema)
+    placeholders = ",".join("%s" for _ in values)
+    with psycopg.connect(disposable_embed_schema) as connection:
+        if table == "tagging_config":
+            _insert_representation_prerequisites(connection)
+            values = (
+                "e" * 64,
+                "a" * 64,
+                "b" * 64,
+                "f" * 64,
+                "a photo of {name}.",
+                "species-photo-v1",
+                1.0,
+                Jsonb({}),
+                1.5,
+                Jsonb({}),
+            )
+        with pytest.raises(psycopg.Error):
+            with connection.transaction():
+                connection.execute(
+                    f"INSERT INTO bird_embed.{table} ({columns}) "
+                    f"VALUES ({placeholders})",
+                    values,
+                )
+
+
+@pytest.mark.real_database
+@pytest.mark.parametrize(
+    ("architecture", "dimension", "logit_scale"),
+    [
+        ("other", 512, 1.0),
+        ("ViT-B-16", 511, 1.0),
+        ("ViT-B-16", 512, 0.0),
+        ("ViT-B-16", 512, float("inf")),
+        ("ViT-B-16", 512, float("nan")),
+    ],
+)
+def test_model_constraints_reject_incompatible_identity(
+    disposable_embed_schema: str,
+    architecture: str,
+    dimension: int,
+    logit_scale: float,
+) -> None:
+    initialize_database(disposable_embed_schema)
+    with psycopg.connect(disposable_embed_schema) as connection:
+        with pytest.raises(psycopg.Error):
+            with connection.transaction():
+                connection.execute(
+                    "INSERT INTO bird_embed.embedding_model "
+                    "(model_fingerprint,upstream_name,upstream_revision,"
+                    "checkpoint_sha256,config_sha256,tokenizer_sha256,architecture,"
+                    "dimension,preprocessing_json,tokenizer_json,adapter_version,"
+                    "runtime_json,logit_scale,canonical_json) "
+                    "VALUES (%s,'test','revision',%s,%s,%s,%s,%s,'{}','{}','test',"
+                    "'{}',%s,'{}')",
+                    (
+                        "a" * 64,
+                        "1" * 64,
+                        "2" * 64,
+                        "3" * 64,
+                        architecture,
+                        dimension,
+                        logit_scale,
+                    ),
+                )
 
 
 @pytest.mark.real_database
@@ -271,9 +677,23 @@ def test_stale_run_recovery_preserves_pending_items_and_lighting(
 
 
 @pytest.mark.real_database
-@pytest.mark.parametrize("after_commit", [False, True])
+@pytest.mark.parametrize(
+    ("after_commit", "failure_statement"),
+    [
+        (False, None),
+        (True, None),
+        (False, "INSERT INTO bird_embed.crop_snapshot"),
+        (False, "INSERT INTO bird_embed.crop_representation"),
+        (False, "INSERT INTO bird_embed.species_decision"),
+        (False, "UPDATE bird_embed.run_item"),
+        (False, "UPDATE bird_embed.processing_run"),
+    ],
+)
 def test_storage_atomically_persists_and_inspects_crop_across_connections(
-    disposable_embed_schema: str, tmp_path: Path, after_commit: bool
+    disposable_embed_schema: str,
+    tmp_path: Path,
+    after_commit: bool,
+    failure_statement: str | None,
 ) -> None:
     initialize_database(disposable_embed_schema)
     now = datetime.now(UTC)
@@ -414,9 +834,32 @@ def test_storage_atomically_persists_and_inspects_crop_across_connections(
     try:
         writer.register_run(run, (pending_item,), model, candidates, config)
         assert writer._writer_connection is not None
-        writer._writer_connection = _ConnectionWithLostCommitAcknowledgement(
-            writer._writer_connection, after_commit=after_commit
-        )
+        with pytest.raises(EmbedValidationError):
+            writer.commit_crop_result(
+                snapshot,
+                representation,
+                replace(
+                    decision,
+                    assigned_species_id="outside-candidates",
+                    best_candidate_id="outside-candidates",
+                ),
+                complete_item,
+            )
+        with pytest.raises(StorageError, match="does not match its run"):
+            writer.commit_crop_result(
+                snapshot,
+                replace(representation, model_fingerprint="9" * 64),
+                decision,
+                complete_item,
+            )
+        if failure_statement is None:
+            writer._writer_connection = _ConnectionWithLostCommitAcknowledgement(
+                writer._writer_connection, after_commit=after_commit
+            )
+        else:
+            writer._writer_connection = _ConnectionWithFailureAfterStatement(
+                writer._writer_connection, failure_statement
+            )
         with pytest.raises(UnconfirmedCommitError, match="unconfirmed"):
             writer.commit_crop_result(snapshot, representation, decision, complete_item)
         writer._writer_connection = None
@@ -460,7 +903,8 @@ def test_storage_atomically_persists_and_inspects_crop_across_connections(
         durable_decision = writer.get_completed_decision(
             snapshot.snapshot_id, model.model_fingerprint, config.config_fingerprint
         )
-        if after_commit:
+        committed_durably = after_commit and failure_statement is None
+        if committed_durably:
             assert durable_decision == decision
             expected_representation = representation
             expected_decision = decision
@@ -532,9 +976,9 @@ def test_storage_atomically_persists_and_inspects_crop_across_connections(
     run_summary, items = reader.inspect_run(retry_run_id)
     recovered_summary, _ = reader.inspect_run(run_id)
     assert recovered_summary["status"] == "interrupted"
-    assert recovered_summary["counts"]["completed"] == int(after_commit)
-    assert run_summary["counts"]["skipped"] == int(after_commit)
-    assert run_summary["counts"]["completed"] == int(not after_commit)
-    assert items[0]["status"] == ("skipped" if after_commit else "completed")
+    assert recovered_summary["counts"]["completed"] == int(committed_durably)
+    assert run_summary["counts"]["skipped"] == int(committed_durably)
+    assert run_summary["counts"]["completed"] == int(not committed_durably)
+    assert items[0]["status"] == ("skipped" if committed_durably else "completed")
     assert items[0]["provenance"]["lighting"] == "unknown"
     assert items[0]["provenance"]["capture_time"] is None
