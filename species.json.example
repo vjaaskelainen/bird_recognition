@@ -1,0 +1,9 @@
+{
+  "schema_version": 1,
+  "species": [
+    {
+      "id": "sciurus_vulgaris",
+      "name": "Eurasian red squirrel (Sciurus vulgaris)"
+    }
+  ]
+}

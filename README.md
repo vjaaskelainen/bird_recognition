@@ -111,6 +111,17 @@ set `BIRD_RECOGNITION_DATABASE_URL` privately when your local credentials differ
 For explicit/manual setup, `bird-recognition database-init` applies the same
 pending migrations.
 
+## Species list for crop indexing
+
+The index command requires a candidate species list. Start with the illustrative
+`species.json.example`, copy it to a private location
+outside the repository, and edit the candidates for your cameras. The example
+contains only the Eurasian red squirrel; it is a format example, not a regional
+checklist. Keep stable IDs and unique species-level names. Set
+`BIRD_RECOGNITION_SPECIES_LIST` in your ignored local `.env` or pass
+`--species-list` to `bird-recognition index`. Scores are relative to the selected
+candidate list; an animal not listed can still receive a high score.
+
 ## AI-assisted development
 
 Repository-wide coding-agent guidance is in [`AGENTS.md`](AGENTS.md). The
