@@ -123,8 +123,7 @@ def load_bioclip(model_directory: Path) -> BioClipModel:
         raise EmbedValidationError("OpenCLIP runtime is unavailable") from error
 
     try:
-        model = _create_model(open_clip, torch)
-        open_clip.load_checkpoint(model, str(checkpoint_path), strict=True)
+        model = _create_model(open_clip, torch, checkpoint_path)
         model = model.to(device="cpu", dtype=torch.float32)
         model.eval()
         preprocess = _build_preprocess(image_transform, config)
@@ -297,10 +296,10 @@ def _require_packaged_bpe() -> tuple[Any, str]:
     return resource, hashlib.sha256(content).hexdigest()
 
 
-def _create_model(open_clip: Any, torch: Any) -> Any:
+def _create_model(open_clip: Any, torch: Any, checkpoint_path: Path) -> Any:
     return open_clip.create_model(
         ARCHITECTURE,
-        pretrained=None,
+        pretrained=str(checkpoint_path),
         device="cpu",
         precision="fp32",
         force_image_size=IMAGE_SIZE,

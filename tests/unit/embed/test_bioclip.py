@@ -147,19 +147,13 @@ def test_load_bioclip_strictly_loads_local_checkpoint_on_cpu(
     model = _ControlledLoadedModel(torch)
 
     def create_model(
-        open_clip_module: object, torch_module: object
+        open_clip_module: object, torch_module: object, checkpoint_path: Path
     ) -> _ControlledLoadedModel:
-        loaded["factory"] = (open_clip_module, torch_module)
+        loaded["factory"] = (open_clip_module, torch_module, checkpoint_path)
         return model
-
-    def load_checkpoint(
-        selected_model: _ControlledLoadedModel, path: str, *, strict: bool
-    ) -> None:
-        loaded["checkpoint"] = (selected_model, Path(path).name, strict)
 
     monkeypatch.setattr(bioclip, "_require_packaged_bpe", lambda: (None, "5" * 64))
     monkeypatch.setattr(bioclip, "_create_model", create_model)
-    monkeypatch.setattr(open_clip, "load_checkpoint", load_checkpoint)
     monkeypatch.setattr(
         open_clip, "get_tokenizer", lambda name: lambda prompts: prompts
     )
@@ -169,17 +163,24 @@ def test_load_bioclip_strictly_loads_local_checkpoint_on_cpu(
 
     adapter = bioclip.load_bioclip(root)
 
-    assert loaded["checkpoint"] == (model, bioclip.ASSET_CHECKPOINT_NAME, True)
+    assert loaded["factory"] == (
+        open_clip,
+        torch,
+        root / bioclip.ASSET_CHECKPOINT_NAME,
+    )
     assert adapter.identity.architecture == "ViT-B-16"
     assert adapter.identity.dimension == 512
     assert adapter.identity.upstream_revision == "a" * 40
     assert adapter.identity.logit_scale == pytest.approx(2.0)
 
 
-def test_create_model_disables_all_pretrained_and_hub_loading() -> None:
+def test_create_model_loads_local_checkpoint_without_hub_loading(
+    tmp_path: Path,
+) -> None:
     from bird_recognition.embed.bioclip import _create_model
 
     options: dict[str, object] = {}
+    checkpoint_path = tmp_path / "open_clip_pytorch_model.bin"
 
     class Model:
         def to(self, **kwargs: object) -> Model:
@@ -192,9 +193,9 @@ def test_create_model_disables_all_pretrained_and_hub_loading() -> None:
     clip = SimpleNamespace(create_model=factory)
     torch = SimpleNamespace(float32="float32")
 
-    _create_model(clip, torch)
+    _create_model(clip, torch, checkpoint_path)
 
-    assert options["pretrained"] is None
+    assert options["pretrained"] == str(checkpoint_path)
     assert options["pretrained_image"] is False
     assert options["pretrained_text"] is False
     assert "pretrained_hf" not in options
