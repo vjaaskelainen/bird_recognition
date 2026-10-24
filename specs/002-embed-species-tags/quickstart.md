@@ -3,8 +3,11 @@
 **Status**: US1–US3 commands and offline correctness contracts are implemented.
 The developer reports all 8 opted-in PostgreSQL integration test cases passed
 against the disposable smoke-test database using the repository's `pyproject.toml`
-pytest configuration, and the built wheel exposes its migration resource. The full
-acceptance matrix, provisioned-model, and biological-quality gates remain pending.
+pytest configuration, and the built wheel exposes its migration resource. A
+developer-reported 143-crop acceptance run completed and its repeat skipped all
+143 crops; correct checkpoint loading was confirmed. The measured biological-
+quality evidence gate is complete (T050/SC-007); the remaining acceptance matrix
+is still pending. The evaluation found poor precision and is not an accuracy claim.
 
 Run all commands from `C:\code\bird_recognition` in PowerShell 5.1. Use the
 existing `.venv`; if absent, stop and ask the developer. Do not activate it.
@@ -128,6 +131,23 @@ restart. A new inspect process needs only the database, not the model/species fi
 or readable crops. Check original source/frame/elapsed/detection/capture/lighting
 provenance and distinguish detector confidence from species confidence.
 
+Developer-recorded acceptance run (2026-10-23): ingestion processed 9 sources
+(270 sampled, 2 person-excluded, 151 with no animal, 117 retained) and produced
+143 crops. Index run `fb65c3f8-210c-41a6-987f-52555b3094de` selected/completed
+143, assigned 126, marked 17 unknown, failed 0, and reported
+`durable_status_confirmed: true`. The repeat run
+`86168b1c-04f8-429d-8613-8492218c6279` selected/skipped all 143, completed 0,
+and failed 0. The developer confirms the correct checkpoint loaded after fixing
+model-loading order. The logged model fingerprint was
+`b0290be8181221f3a818c9e7928041ab6a24313f57a560639a0d1797d13c95f8`; that same
+fingerprint appeared in an earlier attempt that logged a no-pretrained-weights
+warning, so it does not independently establish checkpoint identity. The asset
+manifest revision and file hashes were not included in the acceptance record.
+This run demonstrates successful processing and repeat skipping, not species
+accuracy or completion of the controlled 100-crop/retry/retag/failure/preflight
+matrix. Assigned and unknown counts are model outputs, not reviewed correctness
+labels.
+
 Warnings must explain candidate-relative confidence, incomparable scores across
 candidate sets, and possible high confidence for out-of-list animals. Controlled
 scores prove below-threshold/tie unknowns, qualifying threshold equality, and
@@ -225,6 +245,24 @@ yield null/unavailable. Report unlabeled samples; low precision/coverage is a
 measured limitation, not a reason to omit a group. `publication_ready` only checks
 minimum sample coverage, never certifies accuracy. If real labeled examples are
 unavailable, explicitly leave SC-007 unmet and publish no quality claims.
+
+Reviewed biological-quality evaluation (2026-10-24): report
+`1c44f970-9941-4b1b-b702-f64a72b97b6d` evaluated run
+`d944a363-bf92-4cc5-96be-4c64d5cfdf2c` with model fingerprint
+`b0290be8181221f3a818c9e7928041ab6a24313f57a560639a0d1797d13c95f8` and
+threshold 0.5. It covered 10 completed day and 10 completed night labels, so
+`publication_ready` was true for the sample-count gate only. Day: 9 assigned,
+2 correct, precision 0.2222, assignment coverage 0.9, processing coverage 1.0;
+night: 4 assigned, 0 correct, precision 0.0, assignment coverage 0.4, processing
+coverage 1.0. There were no unknown-lighting labels in this reviewed cohort;
+the report's unknown group had sample count 0. The report documented failure
+examples and 194 unlabeled run items. These are measured results, not a positive
+quality finding: precision was low, and this workflow makes no claim of reliable
+species identification. The report and labels remain external; only non-private
+aggregate metrics and evaluation/run IDs are retained here. This evaluation
+completes the evidence requirement for SC-007/T050, not the separate T049
+acceptance matrix. The model fingerprint identifies the tested model contract;
+as noted above, it does not independently authenticate checkpoint origin.
 
 ## 10. Final implementation checks
 
