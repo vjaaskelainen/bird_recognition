@@ -295,3 +295,18 @@ as noted above, it does not independently authenticate checkpoint origin.
 Document exact results, including skipped integration/smoke tests and any unmet
 quality evidence gate. No source code, dependencies, services or private data are
 created by this planning guide itself.
+
+T051 validation (2026-10-25): the full configured offline suite passed with **316
+passed, 2 skipped** (318 collected, 100.56 seconds). One skip is the Unix-domain
+socket URL case, unsupported on Windows; the symlink-escape case could not create
+its symlink because Windows returned `WinError 1314` (required privilege not held).
+Ruff lint passed (`All checks passed!`), and format check passed (`97 files already
+formatted`). The default pytest configuration collects `tests/unit`; it did not run
+the opt-in PostgreSQL integration tests or BioCLIP model smoke test. The latest
+recorded real-DB result remains T049's 31 passing tests against the approved
+disposable local database; no new database was contacted for T051. Model smoke was
+not run because no opt-in assets were supplied. T050's separately reviewed quality
+evaluation remains the recorded quality evidence (10 day and 10 night examples,
+low measured precision, no positive accuracy claim); it was not rerun as part of
+T051. No quality-evidence gate is claimed from the offline suite.
+
