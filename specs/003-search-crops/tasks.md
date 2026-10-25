@@ -24,8 +24,8 @@ No setup tasks are required; existing CLI, BioCLIP adapter, PostgreSQL/pgvector 
 
 **Purpose**: Establish shared search contracts and configuration before implementing any user story.
 
-- [ ] T001 [P] Define transient `SearchRequest`, `SearchContext`, `SearchResult`, `SearchOutcome`, and typed search failure contracts in `src/bird_recognition/embed/models.py`, including query/run identity, filters, context fingerprints, result provenance, and success versus failure outcomes.
-- [ ] T002 [P] Extend `src/bird_recognition/embed/config.py` to resolve required database URL and local model directory using CLI > process environment > discovered `.env` precedence, with no credential or asset-path built-in defaults.
+- [X] T001 [P] Define transient `SearchRequest`, `SearchContext`, `SearchResult`, `SearchOutcome`, and typed search failure contracts in `src/bird_recognition/embed/models.py`, including query/run identity, filters, context fingerprints, result provenance, and success versus failure outcomes.
+- [X] T002 [P] Extend `src/bird_recognition/embed/config.py` to resolve required database URL and local model directory using CLI > process environment > discovered `.env` precedence, with no credential or asset-path built-in defaults.
 
 **Checkpoint**: Shared contracts and local configuration rules are available to all story implementations.
 

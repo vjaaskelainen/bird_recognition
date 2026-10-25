@@ -241,6 +241,7 @@ def resolve_embed_configuration(
         "index": ("database_url", "model_dir", "species_list"),
         "inspect": ("database_url",),
         "evaluate-species": ("database_url",),
+        "search": ("database_url", "model_dir"),
     }
     if command not in required_by_command:
         raise EmbedValidationError("unsupported embedding command")

@@ -5,10 +5,10 @@ from __future__ import annotations
 import math
 import re
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime
 from enum import StrEnum
 from pathlib import Path
-from typing import Protocol
+from typing import Literal, Protocol
 from uuid import UUID
 
 type Vector = tuple[float, ...]
@@ -43,6 +43,26 @@ class PreflightError(StorageError):
 
 class UnconfirmedCommitError(StorageError):
     """Raised when a commit may be durable but its acknowledgement was lost."""
+
+
+class SearchError(EmbedError):
+    """Base error for text-search failures."""
+
+
+class SearchValidationError(SearchError, ValueError):
+    """Raised when a search query, filter, or result contract is invalid."""
+
+
+class SearchContextError(SearchValidationError):
+    """Raised when a selected run or tagging context is invalid or incompatible."""
+
+
+class SearchOperationalError(SearchError):
+    """Raised when search cannot complete because of an operational failure."""
+
+
+class SearchRepresentationError(SearchOperationalError):
+    """Raised when the selected run has no compatible crop representations."""
 
 
 class Lighting(StrEnum):
@@ -278,6 +298,254 @@ class SpeciesDecision:
 
     def __post_init__(self) -> None:
         _validate_sha256("config_fingerprint", self.config_fingerprint)
+
+
+@dataclass(frozen=True, slots=True)
+class SearchRequest:
+    """Validated transient search query, selected run, and explicit filters."""
+
+    query: str
+    run_id: UUID
+    start_date: date | None = None
+    end_date: date | None = None
+    lighting: Lighting | None = None
+    species_id: str | None = None
+    limit: int = 5
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.query, str) or not self.query.strip():
+            raise SearchValidationError("search query must not be blank")
+        if not isinstance(self.run_id, UUID):
+            raise SearchValidationError("search run ID must be a UUID")
+        for name in ("start_date", "end_date"):
+            value = getattr(self, name)
+            if value is not None and type(value) is not date:
+                raise SearchValidationError(f"{name.replace('_', ' ')} must be a date")
+        if (
+            self.start_date is not None
+            and self.end_date is not None
+            and self.start_date > self.end_date
+        ):
+            raise SearchValidationError("start date must not be after end date")
+        if self.lighting is not None and (
+            not isinstance(self.lighting, Lighting) or self.lighting is Lighting.UNKNOWN
+        ):
+            raise SearchValidationError("lighting filter must be day or night")
+        if self.species_id is not None and (
+            not isinstance(self.species_id, str) or not self.species_id.strip()
+        ):
+            raise SearchValidationError("species ID filter must not be blank")
+        if type(self.limit) is not int or self.limit <= 0:
+            raise SearchValidationError("search limit must be a positive whole number")
+
+
+@dataclass(frozen=True, slots=True)
+class SearchContext:
+    """One selected run's exact model/tagging context and eligible crop identities."""
+
+    run_id: UUID
+    model_fingerprint: Sha256
+    config_fingerprint: Sha256
+    candidate_set_fingerprint: Sha256
+    candidate_ids: tuple[str, ...]
+    selected_crop_ids: tuple[str, ...]
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.run_id, UUID):
+            raise SearchContextError("search context run ID must be a UUID")
+        for name in (
+            "model_fingerprint",
+            "config_fingerprint",
+            "candidate_set_fingerprint",
+        ):
+            value = getattr(self, name)
+            if not isinstance(value, str) or not _SHA256_PATTERN.fullmatch(value):
+                raise SearchContextError(
+                    "search context "
+                    f"{name.replace('_', ' ')} must be a lowercase SHA-256 digest"
+                )
+        if any(
+            not isinstance(candidate_id, str) or not candidate_id
+            for candidate_id in self.candidate_ids
+        ):
+            raise SearchContextError("search context candidate IDs must not be blank")
+        if not self.candidate_ids:
+            raise SearchContextError("search context candidate set must not be empty")
+        if tuple(sorted(set(self.candidate_ids))) != self.candidate_ids:
+            raise SearchContextError(
+                "search context candidate IDs must be unique and sorted"
+            )
+        if any(
+            not isinstance(crop_id, str) or not crop_id
+            for crop_id in self.selected_crop_ids
+        ):
+            raise SearchContextError("search context crop IDs must not be blank")
+        if len(set(self.selected_crop_ids)) != len(self.selected_crop_ids):
+            raise SearchContextError("search context crop IDs must be unique")
+
+
+@dataclass(frozen=True, slots=True)
+class SearchResult:
+    """One ranked crop match with its selected decision and source provenance."""
+
+    rank: int
+    similarity: float
+    crop_id: str
+    snapshot_id: Sha256
+    representation_id: UUID
+    decision_id: UUID
+    config_fingerprint: Sha256
+    assigned_species_id: str | None
+    species_confidence: float
+    crop_path: Path
+    image_status: Literal["available", "unavailable"]
+    source_id: str
+    source_video: str
+    source_original_path: str
+    frame_number: int
+    elapsed_seconds: float
+    capture_time: str | None
+    capture_timezone: str | None
+    lighting: Lighting
+    detection_id: str
+    detection_category: str
+    detection_confidence: float
+    detection_box_normalized: tuple[float, float, float, float]
+    crop_box_pixels: tuple[int, int, int, int]
+    frame_width: int
+    frame_height: int
+
+    def __post_init__(self) -> None:
+        if type(self.rank) is not int or self.rank <= 0:
+            raise SearchValidationError("search result rank must be positive")
+        if (
+            not isinstance(self.similarity, (int, float))
+            or isinstance(self.similarity, bool)
+            or not math.isfinite(self.similarity)
+            or not -1 <= self.similarity <= 1
+        ):
+            raise SearchValidationError("similarity must be finite and within [-1, 1]")
+        if (
+            not isinstance(self.species_confidence, (int, float))
+            or isinstance(self.species_confidence, bool)
+            or not math.isfinite(self.species_confidence)
+            or not 0 <= self.species_confidence <= 1
+        ):
+            raise SearchValidationError(
+                "species confidence must be finite and within [0, 1]"
+            )
+        if (
+            not isinstance(self.detection_confidence, (int, float))
+            or isinstance(self.detection_confidence, bool)
+            or not math.isfinite(self.detection_confidence)
+            or not 0 <= self.detection_confidence <= 1
+        ):
+            raise SearchValidationError(
+                "detection confidence must be finite and within [0, 1]"
+            )
+        for name in ("snapshot_id", "config_fingerprint"):
+            value = getattr(self, name)
+            if not isinstance(value, str) or not _SHA256_PATTERN.fullmatch(value):
+                raise SearchValidationError(
+                    f"{name.replace('_', ' ')} must be a lowercase SHA-256 digest"
+                )
+        if not all((self.crop_id, self.source_id, self.detection_id)):
+            raise SearchValidationError(
+                "search result crop, source, and detection IDs are required"
+            )
+        if self.assigned_species_id is not None and not self.assigned_species_id:
+            raise SearchValidationError("assigned species ID must not be blank")
+        if not isinstance(self.crop_path, Path):
+            raise SearchValidationError("crop path must be a local path")
+        if self.image_status not in ("available", "unavailable"):
+            raise SearchValidationError("image status must be available or unavailable")
+        if not isinstance(self.lighting, Lighting):
+            raise SearchValidationError(
+                "search result lighting must be a Lighting value"
+            )
+        if (
+            type(self.frame_number) is not int
+            or self.frame_number < 0
+            or not isinstance(self.elapsed_seconds, (int, float))
+            or isinstance(self.elapsed_seconds, bool)
+            or not math.isfinite(self.elapsed_seconds)
+            or self.elapsed_seconds < 0
+        ):
+            raise SearchValidationError(
+                "frame number and elapsed time must be non-negative"
+            )
+        if self.frame_width <= 0 or self.frame_height <= 0:
+            raise SearchValidationError("frame dimensions must be positive")
+        if len(self.detection_box_normalized) != 4 or any(
+            not isinstance(value, (int, float))
+            or isinstance(value, bool)
+            or not math.isfinite(value)
+            for value in self.detection_box_normalized
+        ):
+            raise SearchValidationError(
+                "detection box must contain four finite coordinates"
+            )
+        if len(self.crop_box_pixels) != 4 or any(
+            type(value) is not int for value in self.crop_box_pixels
+        ):
+            raise SearchValidationError(
+                "crop bounds must contain four integer coordinates"
+            )
+
+
+@dataclass(frozen=True, slots=True)
+class SearchOutcome:
+    """Successful search result, including successful searches with no matches."""
+
+    request: SearchRequest
+    context: SearchContext
+    results: tuple[SearchResult, ...]
+    warnings: tuple[str, ...]
+
+    def __post_init__(self) -> None:
+        if self.request.run_id != self.context.run_id:
+            raise SearchContextError("search outcome run ID does not match its context")
+        if self.request.species_id not in (
+            None,
+            "unknown",
+            *self.context.candidate_ids,
+        ):
+            raise SearchContextError("species ID is not in the selected candidate set")
+        if len(self.results) > self.request.limit:
+            raise SearchValidationError("search outcome exceeds the requested limit")
+        crop_ids = tuple(result.crop_id for result in self.results)
+        if len(set(crop_ids)) != len(crop_ids):
+            raise SearchValidationError(
+                "search outcome contains duplicate crop identities"
+            )
+        if any(crop_id not in self.context.selected_crop_ids for crop_id in crop_ids):
+            raise SearchContextError("search result is outside the selected run")
+        if any(
+            result.rank != index for index, result in enumerate(self.results, start=1)
+        ):
+            raise SearchValidationError(
+                "search result ranks must be contiguous and one-based"
+            )
+        if any(
+            result.config_fingerprint != self.context.config_fingerprint
+            for result in self.results
+        ):
+            raise SearchContextError(
+                "search result decision does not match the selected context"
+            )
+        if any(
+            left.similarity < right.similarity
+            or (left.similarity == right.similarity and left.crop_id > right.crop_id)
+            for left, right in zip(self.results, self.results[1:], strict=False)
+        ):
+            raise SearchValidationError(
+                "search results must be sorted by score and crop ID"
+            )
+
+    @property
+    def returned_count(self) -> int:
+        """Return the number of ranked crop matches."""
+        return len(self.results)
 
 
 @dataclass(frozen=True, slots=True)

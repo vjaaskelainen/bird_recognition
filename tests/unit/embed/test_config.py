@@ -345,6 +345,46 @@ def test_resolve_embed_configuration_uses_dotenv_default() -> None:
     }
 
 
+def test_resolve_search_configuration_uses_cli_process_dotenv_precedence() -> None:
+    resolved = resolve_embed_configuration(
+        "search",
+        explicit={"database_url": "postgresql://cli@localhost/cli_db"},
+        process_environment={
+            "BIRD_RECOGNITION_DATABASE_URL": "postgresql://process@localhost/process_db",
+            "BIRD_RECOGNITION_BIOCLIP_MODEL_DIR": "process-model",
+            "BIRD_RECOGNITION_SPECIES_LIST": "ignored-species.json",
+        },
+        dotenv_environment={
+            "BIRD_RECOGNITION_DATABASE_URL": "postgresql://dotenv@localhost/dotenv_db",
+            "BIRD_RECOGNITION_BIOCLIP_MODEL_DIR": "dotenv-model",
+            "BIRD_RECOGNITION_SPECIES_THRESHOLD": "0.9",
+        },
+    )
+
+    assert resolved == {
+        "database_url": "postgresql://cli@localhost/cli_db",
+        "model_dir": "process-model",
+    }
+
+
+def test_resolve_search_configuration_requires_database_and_model_settings() -> None:
+    with pytest.raises(EmbedValidationError, match="database url is required"):
+        resolve_embed_configuration(
+            "search",
+            explicit={},
+            process_environment={},
+            dotenv_environment={},
+        )
+
+    with pytest.raises(EmbedValidationError, match="model dir is required"):
+        resolve_embed_configuration(
+            "search",
+            explicit={"database_url": "postgresql://bird@localhost/bird_db"},
+            process_environment={},
+            dotenv_environment={},
+        )
+
+
 @pytest.mark.parametrize(
     ("command", "explicit", "environment"),
     [
