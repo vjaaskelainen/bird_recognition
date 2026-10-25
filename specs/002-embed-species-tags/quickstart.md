@@ -208,19 +208,29 @@ at the private production database. With explicit test opt-in:
 .\.venv\Scripts\python.exe -m pytest tests\integration
 ```
 
-Recorded result (developer-reported): all 31 tests in
-`tests/integration/embed/test_storage_integration.py` passed against the configured
+Recorded result: all 31 tests in
+`tests/integration/embed/test_storage_integration.py` passed against the approved
 disposable local PostgreSQL database. This is real persistence/recovery evidence;
-database URLs and credentials are intentionally not recorded. It does not complete
-T049's separate 100-crop/retry/retag/99-plus-1/preflight matrix. A skipped test is
-not a passed persistence boundary.
+database URLs and credentials are intentionally not recorded. A skipped test is not
+a passed persistence boundary.
+
+T049 execution (2026-10-25): the focused synthetic acceptance suite
+`tests/unit/embed/test_pipeline.py` and `tests/unit/embed/test_retry.py` passed
+(24 passed), covering the generated 100-crop completion/restart, 100-item repeat,
+threshold/list retag reuse, 99-plus-1 isolated crop failure, and preflight-no-write
+cases. The existing external wheel passed an `importlib.resources` lookup for
+`bird_recognition/embed/migrations/001_initial.sql` without installing it. After
+explicit approval of the disposable database reset, the opted-in PostgreSQL
+integration file passed (31 passed); its session fixture drops and recreates the
+configured test-named database. No URL or credentials were recorded. Together these
+results complete T049's offline matrix, real persistence boundary, and packaged-
+resource check; they do not establish model accuracy.
 
 The developer also reports a successful wheel build at
 `%TEMP%\bird-recognition-wheel-check\bird_recognition-0.1.0-py3-none-any.whl` and
 a successful `importlib.resources` read of
 `bird_recognition/embed/migrations/001_initial.sql` from that wheel. This verifies
-the packaged migration resource (T003/T015); it does not complete T049's remaining
-acceptance matrix.
+the packaged migration resource (T003/T015) and the wheel-resource portion of T049.
 
 The PostgreSQL integration tests prove database-boundary behavior, not model
 execution or biological quality. For optional local-model smoke validation, set
