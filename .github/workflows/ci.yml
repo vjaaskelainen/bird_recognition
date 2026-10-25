@@ -37,3 +37,52 @@ jobs:
 
       - name: Test
         run: uv run --with pytest pytest
+
+  postgres-integration:
+    name: PostgreSQL persistence acceptance
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg17
+        env:
+          POSTGRES_DB: bird_recognition_test
+          POSTGRES_USER: bird_recognition_test
+          POSTGRES_PASSWORD: bird_recognition_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U bird_recognition_test -d bird_recognition_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.14"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - name: Install dependencies
+        id: sync
+        run: uv sync --locked
+
+      - name: Run real PostgreSQL persistence tests
+        env:
+          BIRD_RECOGNITION_TEST_DATABASE_URL: postgresql://bird_recognition_test:bird_recognition_test@localhost:5432/bird_recognition_test
+        run: uv run pytest tests/integration
+
+      - name: Clean up embedding schema
+        if: always() && steps.sync.outcome == 'success'
+        env:
+          BIRD_RECOGNITION_TEST_DATABASE_URL: postgresql://bird_recognition_test:bird_recognition_test@localhost:5432/bird_recognition_test
+        run: >-
+          uv run python -c 'import os, psycopg; connection = psycopg.connect(os.environ["BIRD_RECOGNITION_TEST_DATABASE_URL"], autocommit=True); connection.execute("DROP SCHEMA IF EXISTS bird_embed CASCADE"); connection.close()'
+
