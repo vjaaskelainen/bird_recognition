@@ -104,23 +104,82 @@ preserves the database across `podman compose down` and restarts. Do not use
 
 Compose reads `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD`, and
 `POSTGRES_PORT` from `.env` (with defaults in `.env.example`). The migration
-service also creates the pgvector extension when needed. The default application
-connection is
-`postgresql://bird_recognition:bird_recognition@localhost:5432/bird_recognition`;
-set `BIRD_RECOGNITION_DATABASE_URL` privately when your local credentials differ.
-For explicit/manual setup, `bird-recognition database-init` applies the same
-pending migrations.
+service also creates the pgvector extension when needed. Set the private
+`BIRD_RECOGNITION_DATABASE_URL` in `.env` to connect the application to this local
+database; it must match your local Compose settings. The application does not
+derive a URL from `POSTGRES_*` or supply a built-in credential default. For
+explicit/manual setup, run `bird-recognition database-init` after the database is
+ready; indexing never installs extensions or migrates the schema.
 
-## Species list for crop indexing
+## Crop embeddings and species tags
 
-The index command requires a candidate species list. Start with the illustrative
-`species.json.example`, copy it to a private location
-outside the repository, and edit the candidates for your cameras. The example
-contains only the Eurasian red squirrel; it is a format example, not a regional
-checklist. Keep stable IDs and unique species-level names. Set
-`BIRD_RECOGNITION_SPECIES_LIST` in your ignored local `.env` or pass
-`--species-list` to `bird-recognition index`. Scores are relative to the selected
-candidate list; an animal not listed can still receive a high score.
+Indexing is an optional local workflow layered on ingestion. It reads the existing
+SQLite manifest and retained crops without changing them; ingestion and
+`extract-frame` remain usable without BioCLIP assets or the embedding database.
+Keep videos, manifests, crops, model assets, candidate lists, evaluation labels,
+and reports outside Git.
+
+Dependencies are declared in `pyproject.toml` and provisioned with the project
+environment. Obtain the original pretrained `imageomics/bioclip` ViT-B-16 bundle
+separately from a trusted immutable upstream revision. The local model directory
+must contain `open_clip_config.json`, `open_clip_pytorch_model.bin`, and a valid
+`asset-manifest.json` with the revision and file SHA-256 values. The adapter uses
+the tokenizer vocabulary packaged with OpenCLIP and never downloads weights or
+falls back to random weights. Model paths and assets are private and must remain
+outside the repository.
+
+Start the local PostgreSQL/pgvector service as described above, then initialize
+its schema explicitly:
+
+```powershell
+.\.venv\Scripts\uv.exe run bird-recognition database-init
+```
+
+The species list is required; there is no implicit vocabulary. Copy
+[`species.json.example`](species.json.example) to a private location and edit it
+for the intended candidates. It is an illustrative format example, not a regional
+checklist. IDs must be stable and names unique. Configure
+`BIRD_RECOGNITION_BIOCLIP_MODEL_DIR`, `BIRD_RECOGNITION_SPECIES_LIST`, and the
+required private `BIRD_RECOGNITION_DATABASE_URL` in ignored `.env`, or supply the
+supported command options. `BIRD_RECOGNITION_SPECIES_THRESHOLD` defaults to `0.5`;
+explicit CLI options override process environment, which overrides `.env`.
+
+Use one explicit manifest and inspect the resulting run by its returned ID:
+
+```powershell
+.\.venv\Scripts\uv.exe run bird-recognition index --manifest "D:\trail-camera\ingested\manifest.sqlite3" --json
+.\.venv\Scripts\uv.exe run bird-recognition inspect --run-id "<run-id-from-index>" --json
+```
+
+Repeat the index command to retry/resume and skip compatible completed work. To
+retag with a new threshold or candidate file, index the same manifest with the new
+selection; the command creates a versioned decision while reusing compatible
+stored image vectors:
+
+```powershell
+.\.venv\Scripts\uv.exe run bird-recognition index --manifest "D:\trail-camera\ingested\manifest.sqlite3" --threshold 0.7 --json
+.\.venv\Scripts\uv.exe run bird-recognition index --manifest "D:\trail-camera\ingested\manifest.sqlite3" --species-list "D:\bird-config\alternate-species.json" --json
+```
+
+Inspecting an explicit run reads persisted data
+and does not require current model files, species files, crops, or inference.
+Species confidence is candidate-relative, not a calibrated probability of
+biological correctness; candidate-set scores are not comparable, and an
+out-of-list animal may score highly. Treat tags as suggestions and review
+measured errors before relying on them.
+
+Evaluate reviewed labels against one persisted run. Keep both labels and report in
+private external paths; evaluation reads stored decisions and does not load model
+assets or images:
+
+```powershell
+.\.venv\Scripts\uv.exe run bird-recognition evaluate-species --run-id "<run-id>" --labels "D:\bird-eval\labels.json" --output "D:\bird-eval\reports\species-quality.json" --json
+```
+
+The day/night sample-count gate is not an accuracy guarantee. Review the measured
+precision, coverage, and failure examples; see the [crop-embedding quickstart](specs/002-embed-species-tags/quickstart.md)
+for model provisioning, retry/retag scenarios, validation steps, and the current
+measured evaluation evidence. Do not publish claims beyond the reviewed results.
 
 ## AI-assisted development
 
