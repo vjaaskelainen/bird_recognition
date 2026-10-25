@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -85,6 +86,10 @@ def test_index_crops_persists_100_results_and_restart_inspects_provenance(
     tmp_path: Path, model_record: EmbeddingModelRecord
 ) -> None:
     snapshots, crop_root = _new_crops(tmp_path, 100)
+    source_bytes = {
+        snapshot.crop_id: (crop_root / snapshot.crop_original_image_path).read_bytes()
+        for snapshot in snapshots
+    }
     candidates = load_species_candidates(
         _candidate_file(
             tmp_path,
@@ -121,6 +126,18 @@ def test_index_crops_persists_100_results_and_restart_inspects_provenance(
     assert len(state.items) == 100
     assert next(iter(state.snapshots.values())).source_content_sha256 == "1" * 64
     assert restarted_store.state.runs[run.run_id].completed_count == 100
+    assert {
+        snapshot.crop_id: (crop_root / snapshot.crop_original_image_path).read_bytes()
+        for snapshot in snapshots
+    } == source_bytes
+    settings = json.loads(run.sanitized_settings_json)
+    assert set(settings) == {
+        "candidate_set_fingerprint",
+        "model_fingerprint",
+        "threshold",
+    }
+    assert "private-password" not in run.sanitized_settings_json
+    assert "postgresql://" not in run.sanitized_settings_json
 
 
 def test_index_crops_skips_exact_completed_decision_without_inference(
@@ -265,7 +282,15 @@ def test_index_crops_stops_after_fatal_shared_model_error(
     candidates = load_species_candidates(
         _candidate_file(tmp_path, [{"id": "bird", "name": "Bird"}])
     )
-    model = FakeModel(model_record, text_results=(SharedModelError("broken model"),))
+    model = FakeModel(
+        model_record,
+        text_results=(
+            SharedModelError(
+                "connection failed for "
+                "postgresql://private-user:private-password@db.example/private_db"
+            ),
+        ),
+    )
     store = FakeStore()
 
     run = index_crops(
@@ -281,6 +306,12 @@ def test_index_crops_stops_after_fatal_shared_model_error(
     assert run.pending_count == 3
     assert model.image_calls == 0
     assert model.text_calls == 1
+    exposed_output = run.sanitized_settings_json + json.dumps(
+        [failure.reason for failure in run.failures]
+    )
+    assert "private-user" not in exposed_output
+    assert "private-password" not in exposed_output
+    assert "db.example" not in exposed_output
 
 
 def test_index_crops_isolates_invalid_image_vector_and_continues(

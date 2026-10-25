@@ -58,6 +58,7 @@ def test_cli_legacy_help_does_not_load_bioclip(command: list[str]) -> None:
 def test_cli_inspect_lists_runs_as_json_without_model_or_manifest(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
+    sys.modules.pop("bird_recognition.embed.bioclip", None)
     from bird_recognition.embed import storage
 
     class ReadOnlyStore:
@@ -93,11 +94,13 @@ def test_cli_inspect_lists_runs_as_json_without_model_or_manifest(
         "schema_version": 1,
         "runs": [{"run_id": "run-1", "status": "complete"}],
     }
+    assert "bird_recognition.embed.bioclip" not in sys.modules
 
 
 def test_cli_inspect_selects_run_and_crop_without_assets(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
+    sys.modules.pop("bird_recognition.embed.bioclip", None)
     from bird_recognition.embed import storage
 
     selected_run_id = uuid4()
@@ -139,6 +142,7 @@ def test_cli_inspect_selects_run_and_crop_without_assets(
     output = capsys.readouterr()
     assert result == 0
     assert json.loads(output.out)["items"][0]["status"] == "skipped"
+    assert "bird_recognition.embed.bioclip" not in sys.modules
 
 
 def test_cli_index_writer_preflight_emits_usage_exit_and_no_run(
@@ -175,6 +179,57 @@ def test_cli_index_writer_preflight_emits_usage_exit_and_no_run(
     assert payload["status"] == "preflight_failure"
     assert payload["code"] == "writer_busy"
     assert payload["run_id"] is None
+
+
+def test_cli_remote_database_error_is_rejected_and_redacted(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from bird_recognition.embed import storage
+
+    def fail_if_connected(database_url: str) -> None:
+        raise AssertionError(f"database connection was attempted: {database_url}")
+
+    monkeypatch.setattr(storage, "PgVectorStore", fail_if_connected)
+    result = main(
+        [
+            "inspect",
+            "--database-url",
+            "postgresql://private-user:private-password@remote.example/bird_db",
+            "--list-runs",
+            "--json",
+        ]
+    )
+
+    output = capsys.readouterr()
+    assert result == 2
+    assert json.loads(output.out)["status"] == "preflight_failure"
+    assert "private-user" not in output.out
+    assert "private-password" not in output.out
+    assert "remote.example" not in output.out
+
+
+def test_cli_does_not_use_test_database_as_an_implicit_runtime_database(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from bird_recognition.embed import storage
+
+    test_database_url = "postgresql://test-user:test-password@localhost/bird_test"
+
+    def fail_if_connected(database_url: str) -> None:
+        raise AssertionError(f"database connection was attempted: {database_url}")
+
+    monkeypatch.setenv("BIRD_RECOGNITION_TEST_DATABASE_URL", test_database_url)
+    monkeypatch.delenv("BIRD_RECOGNITION_DATABASE_URL", raising=False)
+    monkeypatch.setattr("bird_recognition.cli.find_dotenv", lambda usecwd: "")
+    monkeypatch.setattr(storage, "PgVectorStore", fail_if_connected)
+
+    result = main(["inspect", "--list-runs", "--json"])
+
+    output = capsys.readouterr()
+    assert result == 2
+    assert json.loads(output.out)["status"] == "preflight_failure"
+    assert test_database_url not in output.out
+    assert "test-password" not in output.out
 
 
 def test_cli_inspect_requires_run_or_list_and_crop_requires_run() -> None:
@@ -289,6 +344,12 @@ def test_cli_index_emits_required_summary_keys_without_assets(
     )
     monkeypatch.setattr(storage, "PgVectorStore", Store)
     monkeypatch.setattr(pipeline, "index_manifest", lambda *args, **kwargs: run)
+
+    def fail_if_migrated(*args: object, **kwargs: object) -> None:
+        raise AssertionError("index must not initialize or migrate the database")
+
+    monkeypatch.setattr(storage, "initialize_database", fail_if_migrated)
+    monkeypatch.setattr(storage, "apply_pending_migrations", fail_if_migrated)
 
     result = main(
         [
@@ -534,13 +595,18 @@ def test_cli_inspect_warns_when_persisted_candidate_set_has_one_species(
 def test_cli_evaluate_species_writes_read_only_low_quality_report_without_assets(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], tmp_path: Path
 ) -> None:
+    sys.modules.pop("bird_recognition.embed.bioclip", None)
     from bird_recognition.embed import storage
 
     run_id = UUID("00000000-0000-0000-0000-000000000001")
+    database_url = "postgresql://private-user:private-password@localhost/private_db"
 
     class ReadOnlyStore:
         def __init__(self, database_url: str) -> None:
-            assert database_url == "postgresql://bird@localhost/bird_db"
+            assert (
+                database_url
+                == "postgresql://private-user:private-password@localhost/private_db"
+            )
 
         def preflight(self, *, read_only: bool = False) -> None:
             assert read_only
@@ -612,7 +678,7 @@ def test_cli_evaluate_species_writes_read_only_low_quality_report_without_assets
             "--output",
             str(report_path),
             "--database-url",
-            "postgresql://bird@localhost/bird_db",
+            database_url,
             "--json",
         ]
     )
@@ -626,6 +692,10 @@ def test_cli_evaluate_species_writes_read_only_low_quality_report_without_assets
     assert payload["output"] == str(report_path.resolve())
     assert report["publication_ready"] is False
     assert report["groups"]["unknown"]["unknown_count"] == 1
+    assert "bird_recognition.embed.bioclip" not in sys.modules
+    for private_value in ("private-user", "private-password", "private_db"):
+        assert private_value not in output.out
+        assert private_value not in report_path.read_text(encoding="utf-8")
 
 
 def test_cli_evaluate_species_requires_explicit_run_labels_and_output() -> None:
