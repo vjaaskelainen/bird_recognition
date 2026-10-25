@@ -1,18 +1,23 @@
 # Quickstart: Validate Crop Embeddings and Species Tags
 
 **Status**: US1–US3 commands and offline correctness contracts are implemented.
-The developer reports all 8 opted-in PostgreSQL integration test cases passed
-against the disposable smoke-test database using the repository's `pyproject.toml`
-pytest configuration, and the built wheel exposes its migration resource. A
-developer-reported 143-crop acceptance run completed and its repeat skipped all
-143 crops; correct checkpoint loading was confirmed. The measured biological-
-quality evidence gate is complete (T050/SC-007); the remaining acceptance matrix
-is still pending. The evaluation found poor precision and is not an accuracy claim.
+The developer reports all 31 opted-in PostgreSQL integration tests passed against
+a disposable local database and the built wheel exposes its migration resource.
+A 143-crop run and repeat were also reported; reviewed quality evidence exists,
+but found poor precision. The controlled acceptance matrix remains incomplete;
+these results do not claim reliable species identification.
 
 Run all commands from `C:\code\bird_recognition` in PowerShell 5.1. Use the
 existing `.venv`; if absent, stop and ask the developer. Do not activate it.
-See [CLI contract](contracts/cli.md) for all options/formats and
-[data model](data-model.md) for score/count/recovery definitions.
+See [CLI contract](contracts/cli.md) for exact options and schemas,
+[data model](data-model.md) for score/count/recovery definitions, and
+[AGENTS.md](../../AGENTS.md) for approval and dependency-sync policy.
+
+This runbook is not approval for other work. Get separate developer approval
+before source/dependency changes, dependency synchronization, database/service
+setup or schema changes, or using private assets, labels, or data. Dependency
+declarations belong only in `pyproject.toml`; the developer syncs the environment
+and lockfile. `database-init` changes database schema; `index` does not migrate.
 
 ## 1. Prerequisites and private paths
 
@@ -66,7 +71,8 @@ Get-FileHash -Algorithm SHA256 "$model\open_clip_pytorch_model.bin"
 ```
 
 These local hashes prove file identity, not biological quality or trusted origin.
-No real BioCLIP assets were provisioned by the planning workflow.
+Provisioning external model assets and reviewing their origin are separate
+developer actions; the assets are not bundled with the repository.
 
 ## 3. Configure and initialize local storage
 
@@ -107,8 +113,9 @@ all unit tests without collecting smoke or real-database tests.
 
 Expected: no model downloads, DB connection or network in the standard suite;
 real-boundary tests skip unless explicitly opted in. Offline tests prove scoring,
-validation, provenance and orchestration correctness, not species accuracy.
-Keep ingest/extract-frame/help usable with no BioCLIP assets or running database.
+validation, provenance and orchestration correctness, not database persistence or
+species accuracy. Keep ingest/extract-frame/help usable with no BioCLIP assets or
+running database.
 
 ## 5. Index, inspect, and repeat
 
@@ -201,12 +208,12 @@ at the private production database. With explicit test opt-in:
 .\.venv\Scripts\python.exe -m pytest tests\integration
 ```
 
-Recorded result (developer-reported): all 8 integration test cases passed against
-the disposable smoke-test database using the repository's `pyproject.toml` pytest
-configuration. This completes T035's real persistence/recovery test run. Database
-URLs and credentials are intentionally not recorded. The run does not by itself
-complete T013's full listed test-coverage requirements or T049's 100-crop/retry/
-retag/99-plus-1/preflight matrix. A skipped test is not a passed persistence boundary.
+Recorded result (developer-reported): all 31 tests in
+`tests/integration/embed/test_storage_integration.py` passed against the configured
+disposable local PostgreSQL database. This is real persistence/recovery evidence;
+database URLs and credentials are intentionally not recorded. It does not complete
+T049's separate 100-crop/retry/retag/99-plus-1/preflight matrix. A skipped test is
+not a passed persistence boundary.
 
 The developer also reports a successful wheel build at
 `%TEMP%\bird-recognition-wheel-check\bird_recognition-0.1.0-py3-none-any.whl` and
@@ -215,7 +222,8 @@ a successful `importlib.resources` read of
 the packaged migration resource (T003/T015); it does not complete T049's remaining
 acceptance matrix.
 
-For optional local-model smoke validation, set
+The PostgreSQL integration tests prove database-boundary behavior, not model
+execution or biological quality. For optional local-model smoke validation, set
 `BIRD_RECOGNITION_BIOCLIP_SMOKE_MODEL_DIR` and
 `BIRD_RECOGNITION_BIOCLIP_SMOKE_IMAGE` to reviewed external files, then:
 
@@ -224,7 +232,9 @@ For optional local-model smoke validation, set
 ```
 
 Expected: no network requests; finite normalized 512-vector and candidate scores.
-This proves adapter execution only, not species-quality targets.
+This proves local adapter execution only; it is optional and is not species-quality
+evidence. Actual quality requires separately approved, privacy-reviewed labels and
+external model/data, then the measured evaluation gate in section 9.
 
 ## 9. Measure actual quality before publishing claims
 

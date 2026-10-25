@@ -1,6 +1,6 @@
 # CLI Contract: Species Indexing, Inspection, and Evaluation
 
-**Status**: `database-init`, `index`, `inspect`, and `evaluate-species` are implemented; opt-in real PostgreSQL acceptance remains pending.
+**Status**: `database-init`, `index`, `inspect`, and `evaluate-species` are implemented. Developer-reported real PostgreSQL integration tests passed; the separate controlled T049 acceptance matrix remains pending. See the [quickstart](../quickstart.md) for recorded evidence and outstanding gates.
 Existing `ingest` and `extract-frame` behavior stays unchanged.
 
 ## Invocation and common behavior
@@ -22,6 +22,24 @@ read is an operational error; an honestly low-quality report is not a command
 failure. JSON stdout has no progress/log text; diagnostics go to stderr. All output
 is sanitized; never expose credentials, connection URLs or raw psycopg errors
 containing connection strings. Human output is readable but not a parsing API.
+Follow the repository's [approval and sync policy](../../../AGENTS.md): a command
+example is not authorization to change dependencies, provision private assets, or
+operate on a database/service.
+
+## Validation evidence layers
+
+- **Offline correctness**: the default unit suite checks contracts, scoring,
+  provenance and orchestration with substitutes; it does not prove persistence or
+  biological quality.
+- **Database proof**: explicitly opted-in integration tests use only
+  `BIRD_RECOGNITION_TEST_DATABASE_URL` for a disposable local database. A skipped
+  test is not persistence evidence; the broader T049 controlled acceptance matrix
+  is separate.
+- **Model smoke**: optional local-asset smoke tests establish adapter execution
+  only, not species quality.
+- **Measured quality**: requires separately approved external assets and
+  privacy-reviewed labels, then persisted-run evaluation. The day/night sample gate
+  is not an accuracy guarantee; see the quickstart for actual results and caveats.
 
 ## Configuration precedence and environment inventory
 

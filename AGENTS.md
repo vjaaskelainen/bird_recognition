@@ -4,6 +4,7 @@
 
 - Read-only inspection may proceed without approval. Ask before any action that changes files, the environment, dependencies, or external state.
 - Record approval by action/tool category and scope: file-editing tools, terminal commands, and external actions. Approval for one category or scope does not authorize another; ask again when scope is unclear or expands.
+- A task or command example authorizes only its requested scope. Get separate scoped approval before database/service/schema operations or using private model assets, footage, labels, or generated quality reports.
 - For dependency changes, edit only `pyproject.toml`. Do not edit `uv.lock` or run dependency synchronization; ask the user to run `uv sync`.
 
 ## Running commands (Python environment)
@@ -46,7 +47,7 @@ Rules:
 - When a change makes documentation updates appropriate, update the relevant documentation and this file. Keep both brief and avoid duplicating information.
 - Do not copy skill contents into this file. Link to [nls-python](.agents/skills/nls-python/SKILL.md) for Python conventions and [nls-ai-housekeeping](.agents/skills/nls-ai-housekeeping/SKILL.md) for instruction and documentation maintenance when relevant.
 - For spec-driven feature work, use the installed spec-kit skills in `.agents/skills/`: `speckit-specify` → `speckit-plan` → `speckit-tasks` → `speckit-implement` → `speckit-converge`. Use `speckit-clarify` or `speckit-analyze` when useful; establish the project constitution once.
-- Keep ingestion footage and generated outputs outside the repository; keep local model/config provisioning and the safe workflow aligned across the [quickstart](specs/001-ingest-videos/quickstart.md), CLI contract, and README.
+- Keep ingestion footage, model assets, labels and generated reports outside the repository. For embedding workflow and approval boundaries, use the [embedding quickstart](specs/002-embed-species-tags/quickstart.md) and its [CLI contract](specs/002-embed-species-tags/contracts/cli.md); keep ingestion/extract-frame instructions in the [README](README.md).
 - Keep the diagnostic `extract-frame` workflow aligned with [README usage](README.md#extract-a-single-frame); it saves unfiltered full frames, not ingestion crops.
 - Keep `.env.example` as the complete environment-variable inventory and `.env` as local ignored configuration; CLI options take precedence over process environment, `.env`, and built-in defaults.
 - Refer to [`pyproject.toml`](pyproject.toml) and [`.pre-commit-config.yaml`](.pre-commit-config.yaml) for tooling settings; do not duplicate linter or formatter configuration here.
