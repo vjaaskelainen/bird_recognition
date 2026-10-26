@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import os
 import sqlite3
 import uuid
@@ -22,6 +23,7 @@ from bird_recognition.ingest.models import (
     Lighting,
     SampledFrame,
     StorageError,
+    ValidationError,
 )
 
 SCHEMA = """
@@ -226,6 +228,44 @@ def stable_crop_id(
     """Create a stable crop identity from its immutable provenance."""
     identity = f"{source_id}\0{settings_fingerprint}\0{frame_number}\0{detection_id}"
     return hashlib.sha256(identity.encode()).hexdigest()
+
+
+def stable_case_id(
+    source_content_sha256: str,
+    frame_number: int,
+    detection_id: str,
+    detection_box_normalized: tuple[float, float, float, float],
+) -> str:
+    """Derive a crop-policy-independent identity for one source detection."""
+    if len(source_content_sha256) != 64 or any(
+        character not in "0123456789abcdef" for character in source_content_sha256
+    ):
+        raise ValidationError("source content digest must be a lowercase SHA-256")
+    if type(frame_number) is not int or frame_number < 0:
+        raise ValidationError("case frame number must be a non-negative integer")
+    if not isinstance(detection_id, str) or not detection_id:
+        raise ValidationError("case detection ID must not be blank")
+    if len(detection_box_normalized) != 4 or any(
+        not math.isfinite(value) or not 0 <= value <= 1
+        for value in detection_box_normalized
+    ):
+        raise ValidationError("case detection box must contain normalized coordinates")
+    left, top, right, bottom = detection_box_normalized
+    if right <= left or bottom <= top:
+        raise ValidationError("case detection box must have positive area")
+    canonical = json.dumps(
+        {
+            "source_content_sha256": source_content_sha256,
+            "frame_number": frame_number,
+            "detection_id": detection_id,
+            "detection_box_normalized": list(detection_box_normalized),
+        },
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    )
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
 class Manifest:
@@ -555,15 +595,6 @@ class Manifest:
                 )
                 for index, detection in enumerate(detections):
                     detection_id = detection.detection_id or f"d{index:06d}"
-                    pixel_box = normalized_box_to_pixels(
-                        detection.box, frame.width, frame.height
-                    )
-                    left, top, right, bottom = (
-                        pixel_box[0] / frame.width,
-                        pixel_box[1] / frame.height,
-                        pixel_box[2] / frame.width,
-                        pixel_box[3] / frame.height,
-                    )
                     connection.execute(
                         "INSERT INTO detection VALUES (?,?,?,?,?,?,?,?,?,?,?)",
                         (
@@ -573,10 +604,7 @@ class Manifest:
                             frame.frame_number,
                             detection.category.value,
                             detection.confidence,
-                            left,
-                            top,
-                            right,
-                            bottom,
+                            *detection.box,
                             int(detection.qualifies),
                         ),
                     )

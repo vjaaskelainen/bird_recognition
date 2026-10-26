@@ -176,6 +176,64 @@ def test_cli_inspect_selects_run_and_crop_without_assets(
     assert "bird_recognition.embed.bioclip" not in sys.modules
 
 
+def test_cli_inspect_exports_crop_independent_case_id(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from bird_recognition.embed import storage
+    from bird_recognition.ingest.manifest import stable_case_id
+
+    source_digest = "a" * 64
+    detector_box = (0.234567891, 0.123456789, 0.876543219, 0.765432198)
+    expected_case_id = stable_case_id(source_digest, 3, "detection-4", detector_box)
+
+    class ReadOnlyStore:
+        def __init__(self, database_url: str) -> None:
+            del database_url
+
+        def preflight(self, *, read_only: bool = False) -> None:
+            assert read_only
+
+        def inspect_run(
+            self, run_id: UUID, crop_id: str | None = None
+        ) -> tuple[dict[str, object], list[dict[str, object]]]:
+            del run_id, crop_id
+            return (
+                {"candidates": {"species": []}},
+                [
+                    {
+                        "crop_id": "crop-4",
+                        "provenance": {
+                            "source_content_sha256": source_digest,
+                            "frame_number": 3,
+                            "detection_id": "detection-4",
+                            "detection_box_normalized": list(detector_box),
+                        },
+                    }
+                ],
+            )
+
+        def close(self) -> None:
+            return None
+
+    monkeypatch.setattr(storage, "PgVectorStore", ReadOnlyStore)
+    result = main(
+        [
+            "inspect",
+            "--database-url",
+            "postgresql://bird@localhost/bird_db",
+            "--run-id",
+            str(uuid4()),
+            "--json",
+        ]
+    )
+
+    payload = json.loads(capsys.readouterr().out)
+    item = payload["items"][0]
+    assert result == 0
+    assert item["case_id"] == expected_case_id
+    assert item["provenance"]["case_id"] == expected_case_id
+
+
 def test_cli_index_writer_preflight_emits_usage_exit_and_no_run(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], tmp_path: Path
 ) -> None:

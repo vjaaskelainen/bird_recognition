@@ -59,6 +59,36 @@ def _overlaps(first: Path, second: Path) -> bool:
     return first == second or first in second.parents or second in first.parents
 
 
+def _add_case_ids(items: list[dict[str, object]]) -> list[dict[str, object]]:
+    from bird_recognition.ingest.manifest import stable_case_id
+
+    for item in items:
+        provenance = item.get("provenance")
+        if not isinstance(provenance, dict):
+            continue
+        digest = provenance.get("source_content_sha256")
+        frame_number = provenance.get("frame_number")
+        detection_id = provenance.get("detection_id")
+        box = provenance.get("detection_box_normalized")
+        if (
+            not isinstance(digest, str)
+            or type(frame_number) is not int
+            or not isinstance(detection_id, str)
+            or not isinstance(box, (list, tuple))
+            or len(box) != 4
+        ):
+            continue
+        case_id = stable_case_id(
+            digest,
+            frame_number,
+            detection_id,
+            tuple(float(coordinate) for coordinate in box),
+        )
+        provenance["case_id"] = case_id
+        item["case_id"] = case_id
+    return items
+
+
 def _git_root(path: Path) -> Path | None:
     candidate = path
     while not candidate.exists() and candidate != candidate.parent:
@@ -508,6 +538,7 @@ def _dispatch_embed_command(arguments: argparse.Namespace) -> int:
                 except StorageError as error:
                     raise PreflightError(str(error)) from None
                 run_data, items = store.inspect_run(run_id)
+                _add_case_ids(items)
                 report = build_evaluation_report(
                     run_data,
                     items,
@@ -538,7 +569,10 @@ def _dispatch_embed_command(arguments: argparse.Namespace) -> int:
                     store.preflight(read_only=True)
                 except StorageError as error:
                     raise PreflightError(str(error)) from None
-                run_entries = [store.inspect_run(run_id) for run_id in run_ids]
+                run_entries = []
+                for run_id in run_ids:
+                    run_data, items = store.inspect_run(run_id)
+                    run_entries.append((run_data, _add_case_ids(items)))
                 report = build_comparison_report(
                     run_entries,
                     arguments.labels,
@@ -564,6 +598,7 @@ def _dispatch_embed_command(arguments: argparse.Namespace) -> int:
                 run_data, items = store.inspect_run(
                     UUID(arguments.run_id), arguments.crop_id
                 )
+                _add_case_ids(items)
                 species_data = run_data.get("candidates", {})
                 species = (
                     species_data.get("species", [])

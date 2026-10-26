@@ -28,12 +28,17 @@ def _seed_crop(
     source_capture_start: str | None = None,
     lighting: str = "day",
     detection_confidence: float = 0.875,
+    source_content_sha256: str | None = None,
+    detection_box: tuple[float, float, float, float] = (0.2, 0.2, 0.8, 0.8),
 ) -> Path:
     relative_image_path = image_path or f"crops/{crop_id}.png"
     image_file = crop_root / relative_image_path
     image_file.parent.mkdir(parents=True, exist_ok=True)
     image_file.write_bytes(crop_bytes)
-    content_sha256 = hashlib.sha256(f"content-{source_id}".encode()).hexdigest()
+    content_sha256 = (
+        source_content_sha256
+        or hashlib.sha256(f"content-{source_id}".encode()).hexdigest()
+    )
     actual_hash = hashlib.sha256(crop_bytes).hexdigest()
     with sqlite3.connect(database_path) as connection:
         connection.execute("PRAGMA foreign_keys=ON")
@@ -55,7 +60,7 @@ def _seed_crop(
             ),
         )
         connection.execute(
-            "INSERT INTO source_video "
+            "INSERT OR IGNORE INTO source_video "
             "(source_id,original_path,basename,content_sha256,capture_start,"
             "capture_timezone) VALUES (?,?,?,?,?,?)",
             (
@@ -91,12 +96,13 @@ def _seed_crop(
             (source_id, settings_fingerprint, run_id),
         )
         connection.execute(
-            "INSERT INTO detection VALUES (?,?,?,0,'animal',?,0.2,0.2,0.8,0.8,1)",
+            "INSERT INTO detection VALUES (?,?,?,0,'animal',?,?,?,?,?,1)",
             (
                 detection_id,
                 source_id,
                 settings_fingerprint,
                 detection_confidence,
+                *detection_box,
             ),
         )
         connection.execute(
@@ -236,6 +242,95 @@ def test_snapshot_hashes_complete_semantic_provenance(
         snapshot.snapshot_id
         == hashlib.sha256(f"crop\0{expected_digest}".encode()).hexdigest()
     )
+
+
+def test_case_id_is_stable_across_crop_settings_and_source_relocation(
+    ingestion_schema: Path, tmp_path: Path
+) -> None:
+    crop_root = tmp_path / "ingestion-output"
+    shared_digest = hashlib.sha256(b"unchanged source video").hexdigest()
+    _seed_crop(
+        ingestion_schema,
+        crop_root,
+        "crop-original",
+        "source-original-path",
+        "a" * 64,
+        "run-original",
+        "detection-1",
+        source_content_sha256=shared_digest,
+        detection_box=(0.234567891, 0.123456789, 0.876543219, 0.765432198),
+    )
+    _seed_crop(
+        ingestion_schema,
+        crop_root,
+        "crop-new-policy",
+        "source-relocated-path",
+        "b" * 64,
+        "run-new-policy",
+        "detection-1",
+        source_content_sha256=shared_digest,
+        detection_box=(0.234567891, 0.123456789, 0.876543219, 0.765432198),
+    )
+
+    snapshots = read_manifest_snapshot(ingestion_schema, crop_root)
+
+    assert snapshots[0].crop_id != snapshots[1].crop_id
+    assert (
+        snapshots[0].ingest_settings_fingerprint
+        != snapshots[1].ingest_settings_fingerprint
+    )
+    assert snapshots[0].source_id != snapshots[1].source_id
+    assert snapshots[0].case_id == snapshots[1].case_id
+    assert snapshots[0].detection_box_normalized == (
+        0.234567891,
+        0.123456789,
+        0.876543219,
+        0.765432198,
+    )
+
+
+@pytest.mark.parametrize(
+    ("source_id", "detection_id", "detection_box", "source_content_sha256"),
+    [
+        ("source-changed", "detection-1", (0.2, 0.2, 0.8, 0.8), "2" * 64),
+        ("source", "detection-2", (0.2, 0.2, 0.8, 0.8), "1" * 64),
+        ("source", "detection-1", (0.21, 0.2, 0.8, 0.8), "1" * 64),
+    ],
+)
+def test_case_id_changes_when_source_or_detection_changes(
+    ingestion_schema: Path,
+    tmp_path: Path,
+    source_id: str,
+    detection_id: str,
+    detection_box: tuple[float, float, float, float],
+    source_content_sha256: str,
+) -> None:
+    crop_root = tmp_path / "ingestion-output"
+    _seed_crop(
+        ingestion_schema,
+        crop_root,
+        "crop-original",
+        "source",
+        "a" * 64,
+        "run-original",
+        "detection-1",
+        source_content_sha256="1" * 64,
+    )
+    _seed_crop(
+        ingestion_schema,
+        crop_root,
+        "crop-changed",
+        source_id,
+        "b" * 64,
+        "run-changed",
+        detection_id,
+        source_content_sha256=source_content_sha256,
+        detection_box=detection_box,
+    )
+
+    snapshots = read_manifest_snapshot(ingestion_schema, crop_root)
+
+    assert snapshots[0].case_id != snapshots[1].case_id
 
 
 @pytest.mark.parametrize(

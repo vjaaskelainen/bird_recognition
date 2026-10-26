@@ -159,6 +159,18 @@ class IngestedCropSnapshot:
         if self.detection_category != "animal":
             raise EmbedValidationError("crop snapshots require an animal detection")
 
+    @property
+    def case_id(self) -> Sha256:
+        """Return the stable identity shared by crop-policy variants."""
+        from bird_recognition.ingest.manifest import stable_case_id
+
+        return stable_case_id(
+            self.source_content_sha256,
+            self.frame_number,
+            self.detection_id,
+            self.detection_box_normalized,
+        )
+
 
 @dataclass(frozen=True, slots=True)
 class EmbeddingModelRecord:
