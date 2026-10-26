@@ -32,10 +32,15 @@ FIELDS = [
     "expected_species_id",
     "truth_kind",
     "notes",
+    "expected_category",
 ]
 NOT_IN_LIST = "not-in-list"
 UNKNOWN = "unknown"
+OUT_OF_LIST = "out_of_list"
+UNIDENTIFIABLE = "unidentifiable"
+UNUSABLE = "unusable"
 LIGHTING = ("day", "night", "unknown")
+EXPECTED_CATEGORIES = ("bird", "mammal")
 
 
 def load_rows(path: Path) -> list[dict[str, str]]:
@@ -45,6 +50,72 @@ def load_rows(path: Path) -> list[dict[str, str]]:
         if missing:
             raise SystemExit(f"CSV is missing columns: {sorted(missing)}")
         return [{field: row.get(field) or "" for field in FIELDS} for row in reader]
+
+
+def load_taxa(path: Path) -> list[dict[str, str]]:
+    """Load legacy species choices or a strict external review taxonomy."""
+
+    def reject_duplicate_keys(pairs: list[tuple[str, object]]) -> dict[str, object]:
+        document: dict[str, object] = {}
+        for key, value in pairs:
+            if key in document:
+                raise ValueError(f"duplicate JSON key: {key}")
+            document[key] = value
+        return document
+
+    try:
+        document = json.loads(
+            path.read_text(encoding="utf-8"), object_pairs_hook=reject_duplicate_keys
+        )
+    except (OSError, ValueError) as error:
+        raise SystemExit(f"invalid taxonomy file: {error}") from error
+    if not isinstance(document, dict):
+        raise SystemExit("invalid taxonomy file: expected a JSON object")
+
+    if "taxa" in document:
+        if (
+            set(document) != {"schema_version", "taxa"}
+            or document.get("schema_version") != 1
+        ):
+            raise SystemExit("invalid taxonomy file: unsupported schema or fields")
+        taxa = document.get("taxa")
+        if not isinstance(taxa, list) or not taxa:
+            raise SystemExit("invalid taxonomy file: taxa must be a nonempty list")
+        choices: list[dict[str, str]] = []
+        seen_ids: set[str] = set()
+        for taxon in taxa:
+            if not isinstance(taxon, dict) or set(taxon) != {
+                "id",
+                "common_name",
+                "category",
+            }:
+                raise SystemExit("invalid taxonomy file: taxon fields are invalid")
+            taxon_id = taxon["id"]
+            common_name = taxon["common_name"]
+            category = taxon["category"]
+            if (
+                not isinstance(taxon_id, str)
+                or not taxon_id.strip()
+                or not isinstance(common_name, str)
+                or not common_name.strip()
+                or category not in EXPECTED_CATEGORIES
+                or taxon_id.strip().casefold() in seen_ids
+            ):
+                raise SystemExit("invalid taxonomy file: taxon values are invalid")
+            seen_ids.add(taxon_id.strip().casefold())
+            choices.append(
+                {
+                    "id": taxon_id.strip(),
+                    "common_name": common_name.strip(),
+                    "category": category,
+                }
+            )
+        return choices
+
+    species = document.get("species")
+    if not isinstance(species, list):
+        raise SystemExit("invalid taxonomy file: expected legacy species or taxa")
+    return species
 
 
 def save_rows(path: Path, rows: list[dict[str, str]]) -> None:
@@ -59,17 +130,27 @@ def save_rows(path: Path, rows: list[dict[str, str]]) -> None:
 
 def derive_truth(animal_type: str) -> tuple[str, str]:
     """Map the reviewer's choice to (expected_species_id, truth_kind)."""
-    if animal_type == NOT_IN_LIST:
-        return "", "out_of_list"
-    if animal_type == UNKNOWN:
-        return "", "unidentifiable"
+    if animal_type in {OUT_OF_LIST, NOT_IN_LIST}:
+        return "", OUT_OF_LIST
+    if animal_type in {UNIDENTIFIABLE, UNKNOWN}:
+        return "", UNIDENTIFIABLE
+    if animal_type == UNUSABLE:
+        return "", UNUSABLE
     return animal_type, "species"
 
 
-def make_handler(csv_path: Path, rows: list[dict[str, str]], species: list[dict]):
-    choices = [(item["id"], item["name"]) for item in species]
-    choices += [(NOT_IN_LIST, "Not in list"), (UNKNOWN, "Unknown / unidentifiable")]
-    valid_choices = {choice_id for choice_id, _ in choices}
+def make_handler(
+    csv_path: Path, rows: list[dict[str, str]], species: list[dict[str, str]]
+) -> type[BaseHTTPRequestHandler]:
+    choices = [
+        (item["id"], item.get("name") or item["common_name"]) for item in species
+    ]
+    choices += [
+        (OUT_OF_LIST, "Out of list"),
+        (UNIDENTIFIABLE, "Unidentifiable"),
+        (UNUSABLE, "Unusable crop"),
+    ]
+    valid_choices = {choice_id for choice_id, _ in choices} | {NOT_IN_LIST, UNKNOWN}
 
     def first_unlabeled() -> int:
         return next(
@@ -103,7 +184,12 @@ def make_handler(csv_path: Path, rows: list[dict[str, str]], species: list[dict]
             index = self._index(form)
             animal_type = form.get("animal_type", [""])[0]
             lighting = form.get("lighting", [""])[0]
-            if animal_type not in valid_choices or lighting not in LIGHTING:
+            expected_category = form.get("expected_category", [""])[0]
+            if (
+                animal_type not in valid_choices
+                or lighting not in LIGHTING
+                or expected_category not in {"", *EXPECTED_CATEGORIES}
+            ):
                 self.send_error(400, "invalid choice")
                 return
             expected, truth_kind = derive_truth(animal_type)
@@ -112,6 +198,7 @@ def make_handler(csv_path: Path, rows: list[dict[str, str]], species: list[dict]
                 lighting=lighting,
                 expected_species_id=expected,
                 truth_kind=truth_kind,
+                expected_category=expected_category,
                 notes=form.get("notes", [""])[0].strip(),
             )
             save_rows(csv_path, rows)
@@ -139,6 +226,9 @@ def make_handler(csv_path: Path, rows: list[dict[str, str]], species: list[dict]
             row = rows[index]
             done = sum(1 for r in rows if r["animal_type"])
             current = row["animal_type"]
+            current = {NOT_IN_LIST: OUT_OF_LIST, UNKNOWN: UNIDENTIFIABLE}.get(
+                current, current
+            )
             lighting = row["lighting"] or "unknown"
             options = "".join(
                 f'<option value="{html.escape(cid)}"'
@@ -149,6 +239,12 @@ def make_handler(csv_path: Path, rows: list[dict[str, str]], species: list[dict]
                 f'<label><input type="radio" name="lighting" value="{value}"'
                 f"{' checked' if value == lighting else ''}> {value}</label> "
                 for value in LIGHTING
+            )
+            category_options = "".join(
+                f'<option value="{value}"'
+                f"{' selected' if row['expected_category'] == value else ''}>"
+                f"{value or '-- optional --'}</option>"
+                for value in ("", *EXPECTED_CATEGORIES)
             )
             page = f"""<!doctype html><html><head><meta charset="utf-8">
 <title>Crop review {index + 1}/{len(rows)}</title>
@@ -167,6 +263,8 @@ button {{ font-size: 1.1rem; padding: .4rem 1.2rem; }}
 <input type="hidden" name="i" value="{index}">
 <p><select name="animal_type" autofocus required>
 <option value="">-- choose species --</option>{options}</select></p>
+<p><label>Expected category (optional):
+<select name="expected_category">{category_options}</select></label></p>
 <p>Lighting: {light_options}</p>
 <p><input type="text" name="notes" placeholder="notes (optional)"
    value="{html.escape(row["notes"])}"></p>
@@ -204,7 +302,7 @@ def main() -> None:
     rows = load_rows(args.csv)
     if not rows:
         raise SystemExit("CSV has no rows to review")
-    species = json.loads(args.species.read_text(encoding="utf-8"))["species"]
+    species = load_taxa(args.species)
     server = ThreadingHTTPServer(
         ("127.0.0.1", args.port), make_handler(args.csv, rows, species)
     )
