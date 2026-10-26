@@ -1,12 +1,16 @@
 from __future__ import annotations
 
+import hashlib
 import json
+from collections.abc import Callable
 from pathlib import Path
 from uuid import UUID
 
 import pytest
 
+from bird_recognition.embed.config import canonical_json_bytes
 from bird_recognition.embed.evaluation import (
+    build_comparison_report,
     build_evaluation_report,
     write_evaluation_report,
 )
@@ -100,6 +104,79 @@ def _example(crop_id: str, expected: str | None, truth_kind: str) -> dict[str, o
         "crop_id": crop_id,
         "expected_species_id": expected,
         "truth_kind": truth_kind,
+    }
+
+
+def _shared_labels(
+    path: Path,
+    examples: list[dict[str, object]],
+    *,
+    role: str = "held_out_evaluation",
+) -> Path:
+    split_keys = ["source-video-a"]
+    path.write_text(
+        json.dumps(
+            {
+                "schema_version": 2,
+                "label_role": role,
+                "split_mode": "source_video",
+                "source_split_keys": split_keys,
+                "source_split_sha256": hashlib.sha256(
+                    canonical_json_bytes(split_keys)
+                ).hexdigest(),
+                "examples": examples,
+            }
+        ),
+        encoding="utf-8",
+    )
+    return path
+
+
+def _shared_example(
+    case_id: str,
+    crop_id: str,
+    expected: str | None,
+    truth_kind: str = "species",
+    expected_category: str | None = None,
+) -> dict[str, object]:
+    return {
+        "case_id": case_id,
+        "reviewed_crop_id": crop_id,
+        "truth_kind": truth_kind,
+        "expected_taxon_id": expected,
+        "expected_category": expected_category,
+    }
+
+
+def _shared_run(run_id: str, candidate_ids: list[dict[str, str]]) -> dict[str, object]:
+    return {
+        **_run_data(),
+        "run_id": run_id,
+        "candidates": candidate_ids,
+        "config_fingerprint": run_id.replace("-", "0").ljust(64, "0")[:64],
+    }
+
+
+def _shared_item(
+    crop_id: str,
+    case_id: str,
+    assigned: str | None,
+    lighting: str,
+    *,
+    reason: str = "assigned",
+    status: str = "completed",
+) -> dict[str, object]:
+    return {
+        "crop_id": crop_id,
+        "case_id": case_id,
+        "status": status,
+        "lighting": lighting,
+        "decision": (
+            {"assigned_species_id": assigned, "reason": reason}
+            if status in {"completed", "skipped"}
+            else None
+        ),
+        "failure_code": "inference_failed" if status == "failed" else None,
     }
 
 
@@ -299,6 +376,223 @@ def test_evaluation_rejects_duplicate_label_crop_ids(tmp_path: Path) -> None:
         build_evaluation_report(
             _run_data(), _items(), labels_path, expected_run_id=UUID(RUN_ID)
         )
+
+
+def test_shared_comparison_pairs_case_ids_across_setup_specific_crop_ids(
+    tmp_path: Path,
+) -> None:
+    baseline_id = RUN_ID
+    candidate_id = "00000000-0000-0000-0000-000000000002"
+    labels_path = _shared_labels(
+        tmp_path / "shared-labels.json",
+        [
+            _shared_example("case-a", "review-a", "bird-a", expected_category="bird"),
+            _shared_example("case-b", "review-b", "bird-b", expected_category="bird"),
+            _shared_example("case-c", "review-c", "fox", "out_of_list", "mammal"),
+            _shared_example("case-d", "review-d", None, "unusable"),
+        ],
+    )
+    baseline_candidates = [
+        {"id": "bird-a", "name": "Bird A"},
+        {"id": "bird-b", "name": "Bird B"},
+        {"id": "broad_bird", "kind": "category", "category": "bird"},
+        {"id": "broad_mammal", "kind": "category", "category": "mammal"},
+    ]
+    baseline_items = [
+        _shared_item("old-a", "case-a", "bird-a", "day"),
+        _shared_item("old-b", "case-b", "bird-a", "night"),
+        _shared_item("old-c", "case-c", "broad_mammal", "night"),
+        _shared_item("old-d", "case-d", "unknown", "unknown"),
+    ]
+    candidate_items = [
+        _shared_item("new-a", "case-a", "bird-a", "day"),
+        _shared_item("new-b", "case-b", "bird-b", "night"),
+        _shared_item("new-c", "case-c", "unknown", "night", reason="below_threshold"),
+        _shared_item("new-d", "case-d", "unknown", "unknown"),
+    ]
+
+    report = build_comparison_report(
+        [
+            (_shared_run(baseline_id, baseline_candidates), baseline_items),
+            (_shared_run(candidate_id, baseline_candidates), candidate_items),
+        ],
+        labels_path,
+        expected_run_ids=[UUID(baseline_id), UUID(candidate_id)],
+    )
+
+    assert report["paired_case_count"] == 4
+    assert report["setups"][0]["matched_crop_ids"]["case-b"] == "old-b"
+    assert report["setups"][1]["matched_crop_ids"]["case-b"] == "new-b"
+    baseline_night = report["setups"][0]["groups"]["night"]
+    candidate_night = report["setups"][1]["groups"]["night"]
+    assert baseline_night["species_correct_count"] == 0
+    assert baseline_night["species_incorrect_count"] == 1
+    assert baseline_night["category_match_count"] == 1
+    assert baseline_night["species_precision"] == 0.0
+    assert candidate_night["species_correct_count"] == 1
+    assert candidate_night["out_of_list_unassigned_count"] == 1
+    assert candidate_night["unassigned_reason_counts"] == {"below_threshold": 1}
+    assert (
+        report["paired_changes"][0]["outcomes"]["species_correct"]["false_to_true"] == 1
+    )
+    assert report["setups"][0]["publication_ready"] is False
+    assert "fewer_than_10_night_labels" in report["setups"][0]["sample_limitations"]
+
+
+def test_shared_evaluation_excludes_ambiguous_unmatched_and_unusable_cases(
+    tmp_path: Path,
+) -> None:
+    labels_path = _shared_labels(
+        tmp_path / "shared-labels.json",
+        [
+            _shared_example("ambiguous", "review-a", "bird-a"),
+            _shared_example("missing", "review-b", "bird-a"),
+            _shared_example("unusable", "review-c", None, "unusable"),
+        ],
+    )
+    items = [
+        _shared_item("crop-1", "ambiguous", "bird-a", "day"),
+        _shared_item("crop-2", "ambiguous", "bird-a", "day"),
+    ]
+
+    report = build_evaluation_report(
+        _shared_run(RUN_ID, [{"id": "bird-a", "name": "Bird A"}]),
+        items,
+        labels_path,
+        expected_run_id=UUID(RUN_ID),
+    )
+
+    assert report["run"]["matched_case_count"] == 0
+    assert report["ambiguous_case_ids"] == ["ambiguous"]
+    assert report["unmatched_case_ids"] == ["missing", "unusable"]
+    assert report["run"]["groups"]["day"]["labeled_count"] == 0
+
+
+def test_shared_labels_are_candidate_independent_and_tuning_never_publication_ready(
+    tmp_path: Path,
+) -> None:
+    labels_path = _shared_labels(
+        tmp_path / "shared-labels.json",
+        [_shared_example("case-a", "review-a", "not-in-this-run")],
+        role="tuning",
+    )
+    item = _shared_item("crop-a", "case-a", "bird-a", "day")
+
+    report = build_evaluation_report(
+        _shared_run(RUN_ID, [{"id": "bird-a", "name": "Bird A"}]),
+        [item],
+        labels_path,
+        expected_run_id=UUID(RUN_ID),
+    )
+
+    day_group = report["run"]["groups"]["day"]
+    assert day_group["species_absent_from_candidate_count"] == 1
+    assert day_group["species_incorrect_count"] == 1
+    assert report["run"]["publication_ready"] is False
+    assert (
+        "tuning_labels_cannot_support_publication_quality_claims"
+        in report["run"]["sample_limitations"]
+    )
+
+
+def test_shared_metrics_use_null_denominators_and_count_low_quality_separately(
+    tmp_path: Path,
+) -> None:
+    labels_path = _shared_labels(
+        tmp_path / "shared-labels.json",
+        [
+            _shared_example("unusable", "review-a", None, "unusable"),
+            _shared_example("low-quality", "review-b", "bird-a"),
+        ],
+    )
+
+    report = build_evaluation_report(
+        _shared_run(RUN_ID, [{"id": "bird-a", "name": "Bird A"}]),
+        [
+            _shared_item("crop-a", "unusable", "unknown", "day"),
+            _shared_item(
+                "crop-b", "low-quality", "unknown", "day", reason="low_quality"
+            ),
+        ],
+        labels_path,
+        expected_run_id=UUID(RUN_ID),
+    )
+
+    day_group = report["run"]["groups"]["day"]
+    assert day_group["unusable_count"] == 1
+    assert day_group["low_quality_count"] == 1
+    assert day_group["species_precision"] is None
+    assert day_group["species_assignment_coverage"] == 0.0
+    assert day_group["processing_coverage"] == 1.0
+    assert report["run"]["groups"]["night"]["processing_coverage"] is None
+
+
+def test_shared_held_out_sample_gate_passes_with_ten_completed_day_and_night(
+    tmp_path: Path,
+) -> None:
+    items: list[dict[str, object]] = []
+    examples: list[dict[str, object]] = []
+    for lighting in ("day", "night"):
+        for index in range(10):
+            case_id = f"{lighting}-{index}"
+            items.append(_shared_item(f"crop-{case_id}", case_id, "bird-a", lighting))
+            examples.append(_shared_example(case_id, f"review-{case_id}", "bird-a"))
+    run_data = _shared_run(RUN_ID, [{"id": "bird-a", "name": "Bird A"}])
+    run_data["counts"] = {"selected": 20}
+
+    report = build_evaluation_report(
+        run_data,
+        items,
+        _shared_labels(tmp_path / "shared-labels.json", examples),
+        expected_run_id=UUID(RUN_ID),
+    )
+
+    assert report["run"]["publication_ready"] is True
+    assert report["run"]["sample_limitations"] == []
+
+
+@pytest.mark.parametrize(
+    "mutate",
+    [
+        lambda labels: labels.update(label_role="other"),
+        lambda labels: labels.update(source_split_sha256="0" * 64),
+        lambda labels: labels.update(source_split_keys=["z", "a"]),
+        lambda labels: labels["examples"][0].update(truth_kind="unknown"),
+        lambda labels: labels["examples"][0].update(expected_taxon_id=None),
+        lambda labels: labels["examples"][0].update(expected_category="reptile"),
+        lambda labels: labels["examples"][0].update(extra=True),
+    ],
+)
+def test_shared_label_validation_rejects_invalid_fields_and_values(
+    tmp_path: Path, mutate: Callable[[dict[str, object]], None]
+) -> None:
+    labels_path = _shared_labels(
+        tmp_path / "shared-labels.json",
+        [_shared_example("case-a", "review-a", "bird-a")],
+    )
+    document = json.loads(labels_path.read_text(encoding="utf-8"))
+    mutate(document)
+    labels_path.write_text(json.dumps(document), encoding="utf-8")
+
+    with pytest.raises(EmbedValidationError):
+        build_evaluation_report(
+            _shared_run(RUN_ID, [{"id": "bird-a", "name": "Bird A"}]),
+            [_shared_item("crop-a", "case-a", "bird-a", "day")],
+            labels_path,
+            expected_run_id=UUID(RUN_ID),
+        )
+
+
+def test_schema_one_evaluation_report_remains_legacy_version(tmp_path: Path) -> None:
+    report = build_evaluation_report(
+        _run_data(),
+        _items(),
+        _labels(tmp_path / "legacy-labels.json", []),
+        expected_run_id=UUID(RUN_ID),
+    )
+
+    assert report["schema_version"] == 1
+    assert report["run_id"] == RUN_ID
 
 
 def test_evaluation_report_writer_is_external_atomic_and_never_overwrites(
