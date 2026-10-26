@@ -294,6 +294,14 @@ def _build_parser() -> argparse.ArgumentParser:
     evaluation_parser.add_argument("--output", required=True, type=Path)
     evaluation_parser.add_argument("--database-url")
     evaluation_parser.add_argument("--json", action="store_true")
+    comparison_parser = commands.add_parser(
+        "compare-species", help="compare persisted species runs against shared labels"
+    )
+    comparison_parser.add_argument("--run-id", action="append", required=True)
+    comparison_parser.add_argument("--labels", required=True, type=Path)
+    comparison_parser.add_argument("--output", required=True, type=Path)
+    comparison_parser.add_argument("--database-url")
+    comparison_parser.add_argument("--json", action="store_true")
     return parser
 
 
@@ -342,7 +350,10 @@ def main(argv: list[str] | None = None, detector: Detector | None = None) -> int
         "index",
         "inspect",
         "evaluate-species",
+        "compare-species",
     }:
+        if arguments.command == "compare-species" and len(arguments.run_id) < 2:
+            parser.error("compare-species requires at least two --run-id values")
         if (
             arguments.command == "inspect"
             and arguments.crop_id
@@ -511,6 +522,36 @@ def _dispatch_embed_command(arguments: argparse.Namespace) -> int:
                 "report": report,
             }
             run = None
+        elif arguments.command == "compare-species":
+            from bird_recognition.embed.evaluation import (
+                build_comparison_report,
+                load_label_file,
+                validate_report_destination,
+                write_evaluation_report,
+            )
+
+            run_ids = [UUID(value) for value in arguments.run_id]
+            load_label_file(arguments.labels)
+            output_path = validate_report_destination(arguments.output)
+            with closing(PgVectorStore(arguments.database_url)) as store:
+                try:
+                    store.preflight(read_only=True)
+                except StorageError as error:
+                    raise PreflightError(str(error)) from None
+                run_entries = [store.inspect_run(run_id) for run_id in run_ids]
+                report = build_comparison_report(
+                    run_entries,
+                    arguments.labels,
+                    expected_run_ids=run_ids,
+                )
+                saved_path = write_evaluation_report(report, output_path)
+            payload = {
+                "schema_version": 1,
+                "status": "compared",
+                "output": str(saved_path),
+                "report": report,
+            }
+            run = None
         elif arguments.command == "inspect":
             store = PgVectorStore(arguments.database_url)
             try:
@@ -589,15 +630,24 @@ def _dispatch_embed_command(arguments: argparse.Namespace) -> int:
             print(json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str))
         elif arguments.command == "evaluate-species":
             print(f"Evaluation report: {payload['output']}")
-            for lighting, metrics in payload["report"]["groups"].items():
-                precision = metrics["precision"]
+            report = payload["report"]
+            if report.get("schema_version") == 2:
+                report = report["run"]
+            for lighting, metrics in report["groups"].items():
+                precision = metrics.get("precision", metrics.get("species_precision"))
                 precision_label = "unavailable" if precision is None else str(precision)
+                sample_count = metrics.get(
+                    "sample_count", metrics.get("labeled_count", 0)
+                )
                 print(
-                    f"{lighting}: samples={metrics['sample_count']}, "
+                    f"{lighting}: samples={sample_count}, "
                     f"completed={metrics['completed_count']}, "
                     f"precision={precision_label}"
                 )
-            print(f"Publication ready: {payload['report']['publication_ready']}")
+            print(f"Publication ready: {report['publication_ready']}")
+        elif arguments.command == "compare-species":
+            print(f"Comparison report: {payload['output']}")
+            print(f"Paired cases: {payload['report']['paired_case_count']}")
         else:
             print(json.dumps(payload, ensure_ascii=False, indent=2, default=str))
         if run is not None and (

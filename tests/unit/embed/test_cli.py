@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import sys
 from datetime import UTC, datetime
@@ -11,6 +12,35 @@ import pytest
 
 from bird_recognition.cli import _build_parser, main
 from bird_recognition.embed.models import RunStatus
+
+
+def _write_shared_labels(path: Path, case_id: str = "case-1") -> Path:
+    from bird_recognition.embed.config import canonical_json_bytes
+
+    split_keys = ["source-video-1"]
+    path.write_text(
+        json.dumps(
+            {
+                "schema_version": 2,
+                "label_role": "held_out_evaluation",
+                "split_mode": "source_video",
+                "source_split_keys": split_keys,
+                "source_split_sha256": hashlib.sha256(
+                    canonical_json_bytes(split_keys)
+                ).hexdigest(),
+                "examples": [
+                    {
+                        "case_id": case_id,
+                        "reviewed_crop_id": "reviewed-crop-1",
+                        "truth_kind": "species",
+                        "expected_taxon_id": "bird",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    return path
 
 
 def test_cli_parser_exposes_story_one_commands_and_exact_selection_options() -> None:
@@ -26,6 +56,7 @@ def test_cli_parser_exposes_story_one_commands_and_exact_selection_options() -> 
         "index",
         "inspect",
         "evaluate-species",
+        "compare-species",
     }
     with pytest.raises(SystemExit) as usage_error:
         parser.parse_args(["inspect"])
@@ -698,6 +729,78 @@ def test_cli_evaluate_species_writes_read_only_low_quality_report_without_assets
         assert private_value not in report_path.read_text(encoding="utf-8")
 
 
+def test_cli_evaluate_species_accepts_shared_labels(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+) -> None:
+    from bird_recognition.embed import storage
+
+    run_id = UUID("00000000-0000-0000-0000-000000000001")
+
+    class ReadOnlyStore:
+        def __init__(self, database_url: str) -> None:
+            assert database_url == "postgresql://bird@localhost/bird_db"
+
+        def preflight(self, *, read_only: bool = False) -> None:
+            assert read_only
+
+        def inspect_run(
+            self, selected_run_id: UUID, crop_id: str | None = None
+        ) -> tuple[dict[str, object], list[dict[str, object]]]:
+            assert selected_run_id == run_id
+            assert crop_id is None
+            return (
+                {
+                    "run_id": str(run_id),
+                    "status": "complete",
+                    "counts": {"selected": 1},
+                    "candidates": {"species": [{"id": "bird", "name": "Bird"}]},
+                },
+                [
+                    {
+                        "crop_id": "crop-1",
+                        "case_id": "case-1",
+                        "status": "completed",
+                        "lighting": "unknown",
+                        "decision": {
+                            "assigned_species_id": "bird",
+                            "reason": "assigned",
+                        },
+                    }
+                ],
+            )
+
+        def close(self) -> None:
+            return None
+
+    monkeypatch.setattr(storage, "PgVectorStore", ReadOnlyStore)
+    labels = _write_shared_labels(tmp_path / "shared-labels.json")
+    report_path = tmp_path / "shared-evaluation.json"
+    result = main(
+        [
+            "evaluate-species",
+            "--run-id",
+            str(run_id),
+            "--labels",
+            str(labels),
+            "--output",
+            str(report_path),
+            "--database-url",
+            "postgresql://bird@localhost/bird_db",
+            "--json",
+        ]
+    )
+
+    payload = json.loads(capsys.readouterr().out)
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    assert result == 0
+    assert payload["status"] == "evaluated"
+    assert report["schema_version"] == 2
+    assert report["run"]["matched_case_count"] == 1
+    assert report["run"]["groups"]["unknown"]["species_correct_count"] == 1
+
+
 def test_cli_evaluate_species_requires_explicit_run_labels_and_output() -> None:
     parser = _build_parser()
 
@@ -705,6 +808,160 @@ def test_cli_evaluate_species_requires_explicit_run_labels_and_output() -> None:
         parser.parse_args(["evaluate-species"])
 
     assert missing_arguments.value.code == 2
+
+
+def test_cli_compare_species_requires_at_least_two_explicit_runs() -> None:
+    parser = _build_parser()
+
+    with pytest.raises(SystemExit) as missing_arguments:
+        parser.parse_args(["compare-species"])
+    assert missing_arguments.value.code == 2
+
+    with pytest.raises(SystemExit) as one_run:
+        main(
+            [
+                "compare-species",
+                "--run-id",
+                str(uuid4()),
+                "--labels",
+                "labels.json",
+                "--output",
+                "report.json",
+                "--database-url",
+                "postgresql://bird@localhost/bird_db",
+            ]
+        )
+    assert one_run.value.code == 2
+
+
+def test_cli_compare_species_writes_shared_report_for_explicit_run_ids(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+) -> None:
+    from bird_recognition.embed import storage
+
+    run_ids = [
+        UUID("00000000-0000-0000-0000-000000000001"),
+        UUID("00000000-0000-0000-0000-000000000002"),
+    ]
+    database_url = "postgresql://private-user:private-password@localhost/private_db"
+    inspected: list[UUID] = []
+
+    class ReadOnlyStore:
+        def __init__(self, selected_database_url: str) -> None:
+            assert selected_database_url == database_url
+
+        def preflight(self, *, read_only: bool = False) -> None:
+            assert read_only
+
+        def inspect_run(
+            self, selected_run_id: UUID
+        ) -> tuple[dict[str, object], list[dict[str, object]]]:
+            inspected.append(selected_run_id)
+            return (
+                {
+                    "run_id": str(selected_run_id),
+                    "status": "complete",
+                    "counts": {"selected": 1},
+                    "model_fingerprint": "1" * 64,
+                    "candidate_set_fingerprint": "2" * 64,
+                    "scoring_fingerprint": "3" * 64,
+                    "config_fingerprint": "4" * 64,
+                    "threshold": 0.5,
+                    "candidates": {"species": [{"id": "bird", "name": "Bird"}]},
+                },
+                [
+                    {
+                        "crop_id": f"crop-{str(selected_run_id)[-1]}",
+                        "case_id": "case-1",
+                        "status": "completed",
+                        "lighting": "unknown",
+                        "decision": {
+                            "assigned_species_id": "bird",
+                            "reason": "assigned",
+                        },
+                    }
+                ],
+            )
+
+        def close(self) -> None:
+            return None
+
+    monkeypatch.setattr(storage, "PgVectorStore", ReadOnlyStore)
+    labels = _write_shared_labels(tmp_path / "labels.json")
+    report_path = tmp_path / "comparison.json"
+    result = main(
+        [
+            "compare-species",
+            "--run-id",
+            str(run_ids[0]),
+            "--run-id",
+            str(run_ids[1]),
+            "--labels",
+            str(labels),
+            "--output",
+            str(report_path),
+            "--database-url",
+            database_url,
+            "--json",
+        ]
+    )
+
+    output = capsys.readouterr()
+    payload = json.loads(output.out)
+    report_text = report_path.read_text(encoding="utf-8")
+    report = json.loads(report_text)
+    assert result == 0
+    assert output.err == ""
+    assert payload["status"] == "compared"
+    assert payload["output"] == str(report_path.resolve())
+    assert inspected == run_ids
+    assert report["paired_case_count"] == 1
+    assert [setup["run_id"] for setup in report["setups"]] == [
+        str(run_id) for run_id in run_ids
+    ]
+    for private_value in ("private-user", "private-password", "private_db"):
+        assert private_value not in output.out
+        assert private_value not in report_text
+
+
+def test_cli_compare_species_rejects_repository_report_before_database_access(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+) -> None:
+    from bird_recognition.embed import storage
+
+    def unexpected_store(database_url: str) -> None:
+        pytest.fail(f"database should not be accessed: {database_url}")
+
+    monkeypatch.setattr(storage, "PgVectorStore", unexpected_store)
+    labels = tmp_path / "labels.json"
+    labels.write_text('{"schema_version":2}', encoding="utf-8")
+    output_path = Path(__file__).resolve().parents[2] / ".comparison-private-test.json"
+
+    result = main(
+        [
+            "compare-species",
+            "--run-id",
+            str(uuid4()),
+            "--run-id",
+            str(uuid4()),
+            "--labels",
+            str(labels),
+            "--output",
+            str(output_path),
+            "--database-url",
+            "postgresql://bird@localhost/bird_db",
+            "--json",
+        ]
+    )
+
+    payload = json.loads(capsys.readouterr().out)
+    assert result == 2
+    assert payload["status"] == "preflight_failure"
+    assert not output_path.exists()
 
 
 def test_cli_evaluate_species_rejects_repository_report_path_before_database_access(
