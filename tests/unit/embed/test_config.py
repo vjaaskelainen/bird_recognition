@@ -27,6 +27,37 @@ def _species_document(
     }
 
 
+def _candidate_document(
+    candidates: list[dict[str, object]],
+) -> dict[str, object]:
+    return {"schema_version": 2, "candidates": candidates}
+
+
+def _schema_2_candidates() -> list[dict[str, object]]:
+    return [
+        {
+            "id": "great_tit",
+            "kind": "species",
+            "common_name": "Great tit",
+            "taxonomic_description": "Parus major; owner-verified local taxon",
+        },
+        {
+            "id": "broad_bird",
+            "kind": "category",
+            "category": "bird",
+            "common_name": "Bird",
+            "taxonomic_description": "A bird not identified to a listed species",
+        },
+        {
+            "id": "broad_mammal",
+            "kind": "category",
+            "category": "mammal",
+            "common_name": "Mammal",
+            "taxonomic_description": "A mammal not identified to a listed species",
+        },
+    ]
+
+
 def _write_species_file(path: Path, content: str) -> Path:
     path.write_text(content, encoding="utf-8")
     return path
@@ -181,6 +212,201 @@ def test_load_species_candidates_file_order_and_whitespace_do_not_change_identit
     assert first_candidates.candidate_set_fingerprint == (
         second_candidates.candidate_set_fingerprint
     )
+
+
+def test_load_schema_2_candidates_normalizes_and_orders_typed_entries(
+    tmp_path: Path,
+) -> None:
+    values = _schema_2_candidates()
+    first = load_species_candidates(
+        _write_species_file(
+            tmp_path / "schema-2-first.json",
+            json.dumps(_candidate_document(values)),
+        )
+    )
+    second = load_species_candidates(
+        _write_species_file(
+            tmp_path / "schema-2-second.json",
+            json.dumps(_candidate_document(list(reversed(values))), indent=2),
+        )
+    )
+
+    assert first.schema_version == 2
+    assert [candidate.id for candidate in first.candidates] == [
+        "broad_bird",
+        "broad_mammal",
+        "great_tit",
+    ]
+    assert first.candidates == second.candidates
+    assert first.candidates_json == second.candidates_json
+    assert first.candidate_set_fingerprint == second.candidate_set_fingerprint
+    assert first.candidates[0].kind == "category"
+    assert first.candidates[0].category == "bird"
+    assert first.candidates[-1].kind == "species"
+
+
+@pytest.mark.parametrize(
+    "candidates",
+    [
+        [item for item in _schema_2_candidates() if item.get("category") != "bird"],
+        _schema_2_candidates()
+        + [
+            {
+                "id": "another-bird",
+                "kind": "category",
+                "category": "bird",
+                "common_name": "Another bird",
+                "taxonomic_description": "Bird",
+            }
+        ],
+        _schema_2_candidates()
+        + [
+            {
+                "id": "other-tit",
+                "kind": "species",
+                "common_name": "Great tit",
+                "taxonomic_description": "Different species",
+            }
+        ],
+    ],
+)
+def test_load_schema_2_candidates_rejects_missing_or_duplicate_categories_and_names(
+    tmp_path: Path, candidates: list[dict[str, object]]
+) -> None:
+    with pytest.raises(EmbedValidationError):
+        load_species_candidates(
+            _write_species_file(
+                tmp_path / "invalid-schema-2.json",
+                json.dumps(_candidate_document(candidates)),
+            )
+        )
+
+
+@pytest.mark.parametrize(
+    "candidate",
+    [
+        {
+            "id": "tit",
+            "kind": "species",
+            "common_name": "Great tit",
+            "taxonomic_description": "Parus major",
+            "unexpected": "field",
+        },
+        {
+            "id": "bird",
+            "kind": "category",
+            "category": "bird",
+            "common_name": "Bird",
+            "taxonomic_description": "Bird",
+            "unexpected": "field",
+        },
+    ],
+)
+def test_load_schema_2_candidates_rejects_unknown_fields(
+    tmp_path: Path, candidate: dict[str, object]
+) -> None:
+    candidates = _schema_2_candidates() + [candidate]
+
+    with pytest.raises(EmbedValidationError):
+        load_species_candidates(
+            _write_species_file(
+                tmp_path / "unknown-schema-2-field.json",
+                json.dumps(_candidate_document(candidates)),
+            )
+        )
+
+
+def test_load_schema_2_candidates_rejects_duplicate_json_keys(
+    tmp_path: Path,
+) -> None:
+    content = (
+        '{"schema_version":2,"candidates":['
+        '{"id":"great_tit","id":"other","kind":"species",'
+        '"common_name":"Great tit","taxonomic_description":"Parus major"}]}'
+    )
+
+    with pytest.raises(EmbedValidationError):
+        load_species_candidates(
+            _write_species_file(tmp_path / "duplicate.json", content)
+        )
+
+
+def test_build_tagging_config_uses_exact_taxonomy_prompt_and_fingerprints_text(
+    model_record: EmbeddingModelRecord, tmp_path: Path
+) -> None:
+    candidate_set = load_species_candidates(
+        _write_species_file(
+            tmp_path / "schema-2.json",
+            json.dumps(_candidate_document(_schema_2_candidates())),
+        )
+    )
+
+    config = build_tagging_config(model_record, candidate_set)
+    changed_candidates = _schema_2_candidates()
+    changed_candidates[2] = {
+        **changed_candidates[2],
+        "taxonomic_description": "A mammal outside the species list",
+    }
+    changed_set = load_species_candidates(
+        _write_species_file(
+            tmp_path / "schema-2-changed.json",
+            json.dumps(_candidate_document(changed_candidates)),
+        )
+    )
+    changed_config = build_tagging_config(model_record, changed_set)
+
+    assert config.prompt_template == (
+        "a photo of {common_name} ({taxonomic_description})."
+    )
+    assert config.prompt_version == "species-taxonomy-photo-v2"
+    assert config.scoring_fingerprint != changed_config.scoring_fingerprint
+    assert config.config_fingerprint != changed_config.config_fingerprint
+    assert json.loads(config.scoring_json)["prompt_template"] == config.prompt_template
+
+
+def test_format_candidate_prompt_reproduces_schema_1_and_schema_2_text(
+    tmp_path: Path,
+) -> None:
+    from bird_recognition.embed.config import format_candidate_prompt
+
+    legacy = load_species_candidates(
+        _write_species_file(
+            tmp_path / "legacy.json",
+            json.dumps(_species_document([{"id": "tit", "name": "Great tit"}])),
+        )
+    )
+    taxonomy = load_species_candidates(
+        _write_species_file(
+            tmp_path / "taxonomy.json",
+            json.dumps(_candidate_document(_schema_2_candidates())),
+        )
+    )
+
+    assert format_candidate_prompt(legacy.candidates[0], "a photo of {name}.") == (
+        "a photo of Great tit."
+    )
+    assert (
+        format_candidate_prompt(
+            taxonomy.candidates[-1],
+            "a photo of {common_name} ({taxonomic_description}).",
+        )
+        == "a photo of Great tit (Parus major; owner-verified local taxon)."
+    )
+
+
+def test_candidate_examples_load_as_schema_2_and_legacy_schema_1() -> None:
+    repository_root = Path(__file__).resolve().parents[3]
+
+    current = load_species_candidates(repository_root / "species.json.example")
+    legacy = load_species_candidates(repository_root / "species.schema1.json.example")
+
+    assert current.schema_version == 2
+    assert {candidate.category for candidate in current.candidates} == {
+        None,
+        "bird",
+        "mammal",
+    }
+    assert legacy.schema_version == 1
 
 
 def test_canonical_json_bytes_are_sorted_compact_utf8() -> None:

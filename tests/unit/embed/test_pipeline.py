@@ -69,6 +69,41 @@ def _candidate_file(tmp_path: Path, species: list[dict[str, str]]) -> Path:
     return path
 
 
+def _typed_candidate_file(tmp_path: Path) -> Path:
+    path = tmp_path / "typed-candidates.json"
+    path.write_text(
+        json.dumps(
+            {
+                "schema_version": 2,
+                "candidates": [
+                    {
+                        "id": "great_tit",
+                        "kind": "species",
+                        "common_name": "Great tit",
+                        "taxonomic_description": "Parus major",
+                    },
+                    {
+                        "id": "broad_bird",
+                        "kind": "category",
+                        "category": "bird",
+                        "common_name": "Bird",
+                        "taxonomic_description": "An unidentified bird",
+                    },
+                    {
+                        "id": "broad_mammal",
+                        "kind": "category",
+                        "category": "mammal",
+                        "common_name": "Mammal",
+                        "taxonomic_description": "An unidentified mammal",
+                    },
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    return path
+
+
 def _new_crops(tmp_path: Path, count: int) -> tuple[list[IngestedCropSnapshot], Path]:
     root = tmp_path / "crops"
     root.mkdir()
@@ -80,6 +115,41 @@ def _new_crops(tmp_path: Path, count: int) -> tuple[list[IngestedCropSnapshot], 
         image_bytes = path.read_bytes()
         snapshots.append(_snapshot(crop_id, path, image_bytes))
     return snapshots, root
+
+
+def test_index_crops_uses_typed_taxonomy_prompts_and_preserves_coarse_candidate(
+    tmp_path: Path, model_record: EmbeddingModelRecord
+) -> None:
+    snapshots, crop_root = _new_crops(tmp_path, 1)
+    candidates = load_species_candidates(_typed_candidate_file(tmp_path))
+    state = FakeStoreState()
+    model = FakeModel(model_record)
+
+    run = index_crops(
+        snapshots,
+        crop_root=crop_root,
+        manifest_locator=tmp_path / "manifest.sqlite3",
+        candidates=candidates,
+        model=model,
+        store=FakeStore(state),
+        threshold=0.1,
+    )
+
+    decision = next(iter(state.decisions.values()))
+    assert model.prompts == [
+        (
+            "a photo of Bird (An unidentified bird).",
+            "a photo of Mammal (An unidentified mammal).",
+            "a photo of Great tit (Parus major).",
+        )
+    ]
+    assert run.candidate_schema_version == 2
+    assert run.prompt_version == "species-taxonomy-photo-v2"
+    assert run.prompt_template == "a photo of {common_name} ({taxonomic_description})."
+    assert decision.assigned_species_id == "broad_bird"
+    assert state.candidate_sets[candidates.candidate_set_fingerprint].candidates[
+        0
+    ].kind == ("category")
 
 
 def test_index_crops_persists_100_results_and_restart_inspects_provenance(

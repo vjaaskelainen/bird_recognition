@@ -439,6 +439,59 @@ def test_shared_comparison_pairs_case_ids_across_setup_specific_crop_ids(
     assert "fewer_than_10_night_labels" in report["setups"][0]["sample_limitations"]
 
 
+def test_schema_2_category_assignment_does_not_count_as_species_correctness(
+    tmp_path: Path,
+) -> None:
+    labels_path = _shared_labels(
+        tmp_path / "typed-labels.json",
+        [
+            _shared_example(
+                "case-fox",
+                "review-fox",
+                "vulpes_vulpes",
+                expected_category="mammal",
+            )
+        ],
+    )
+    run = _shared_run(
+        RUN_ID,
+        [
+            {
+                "id": "broad_bird",
+                "kind": "category",
+                "category": "bird",
+                "common_name": "Bird",
+                "taxonomic_description": "An unidentified bird",
+            },
+            {
+                "id": "broad_mammal",
+                "kind": "category",
+                "category": "mammal",
+                "common_name": "Mammal",
+                "taxonomic_description": "An unidentified mammal",
+            },
+            {
+                "id": "great_tit",
+                "kind": "species",
+                "common_name": "Great tit",
+                "taxonomic_description": "Parus major",
+            },
+        ],
+    )
+    report = build_evaluation_report(
+        run,
+        [_shared_item("crop-fox", "case-fox", "broad_mammal", "night")],
+        labels_path,
+        expected_run_id=UUID(RUN_ID),
+    )
+
+    metrics = report["run"]["groups"]["night"]
+    assert metrics["species_absent_from_candidate_count"] == 1
+    assert metrics["category_match_count"] == 1
+    assert metrics["species_correct_count"] == 0
+    assert metrics["species_assigned_count"] == 0
+
+
 def test_shared_evaluation_excludes_ambiguous_unmatched_and_unusable_cases(
     tmp_path: Path,
 ) -> None:

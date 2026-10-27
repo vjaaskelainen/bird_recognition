@@ -14,6 +14,7 @@ from PIL import Image, UnidentifiedImageError
 from bird_recognition.embed.config import (
     build_tagging_config,
     canonical_json_sha256,
+    format_candidate_prompt,
     load_species_candidates,
     validate_threshold,
 )
@@ -199,6 +200,9 @@ def _run_index(
         scoring_fingerprint=config.scoring_fingerprint,
         threshold=config.threshold,
         candidate_count=len(candidates.candidates),
+        candidate_schema_version=candidates.schema_version,
+        prompt_template=config.prompt_template,
+        prompt_version=config.prompt_version,
     )
     pending_items = tuple(
         RunItem(
@@ -316,7 +320,7 @@ def _run_index(
                 else:
                     if text_vectors is None:
                         prompts = tuple(
-                            config.prompt_template.format(name=item.name)
+                            format_candidate_prompt(item, config.prompt_template)
                             for item in candidates.candidates
                         )
                         try:
@@ -556,6 +560,9 @@ def _finalize(
         scoring_fingerprint=run.scoring_fingerprint,
         threshold=run.threshold,
         candidate_count=run.candidate_count,
+        candidate_schema_version=run.candidate_schema_version,
+        prompt_template=run.prompt_template,
+        prompt_version=run.prompt_version,
     )
     try:
         store.finalize_run(final_run)
@@ -608,4 +615,7 @@ def _unfinalized_run(
         scoring_fingerprint=run.scoring_fingerprint,
         threshold=run.threshold,
         candidate_count=run.candidate_count,
+        candidate_schema_version=run.candidate_schema_version,
+        prompt_template=run.prompt_template,
+        prompt_version=run.prompt_version,
     )

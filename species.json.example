@@ -1,9 +1,37 @@
 {
-  "schema_version": 1,
-  "species": [
+  "schema_version": 2,
+  "candidates": [
     {
       "id": "sciurus_vulgaris",
-      "name": "Eurasian red squirrel (Sciurus vulgaris)"
+      "kind": "species",
+      "common_name": "Eurasian red squirrel",
+      "taxonomic_description": "Sciurus vulgaris; owner-verified local taxon"
+    },
+    {
+      "id": "vulpes_vulpes",
+      "kind": "species",
+      "common_name": "Red fox",
+      "taxonomic_description": "Vulpes vulpes; owner-verified local taxon"
+    },
+    {
+      "id": "parus_major",
+      "kind": "species",
+      "common_name": "Great tit",
+      "taxonomic_description": "Parus major; owner-verified local taxon"
+    },
+    {
+      "id": "broad_bird",
+      "kind": "category",
+      "category": "bird",
+      "common_name": "Bird",
+      "taxonomic_description": "A bird that cannot be identified to a listed species"
+    },
+    {
+      "id": "broad_mammal",
+      "kind": "category",
+      "category": "mammal",
+      "common_name": "Mammal",
+      "taxonomic_description": "A mammal that cannot be identified to a listed species"
     }
   ]
 }

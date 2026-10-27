@@ -122,8 +122,23 @@ outside the repository.
 
 The species list is required; there is no implicit vocabulary. Copy
 [`species.json.example`](../species.json.example) to a private location and edit
-it for the intended candidates. It is an illustrative format example, not a
-regional checklist. IDs must be stable and names unique. Configure
+it for the intended candidates. It is schema 2: each entry has a stable unique
+`id`, `kind` (`species` or `category`), `common_name`, and
+`taxonomic_description`; category entries additionally require `category`
+(`bird` or `mammal`). A schema-2 list must contain exactly one broad bird and one
+broad mammal candidate. Species descriptions should use owner-verified taxonomy;
+no remote taxonomy service validates these values. Entry order does not affect
+the candidate fingerprint.
+
+Schema-2 text prompts use both descriptive fields exactly as
+`a photo of {common_name} ({taxonomic_description}).` and are versioned as
+`species-taxonomy-photo-v2`. A selected bird or mammal category is a coarse
+outcome, not a confirmed species; category matches are reported separately and
+never count as exact species correctness. Keep the legacy schema-1 prompt
+(`a photo of {name}.`, `species-photo-v1`) reproducible with
+[`species.schema1.json.example`](../species.schema1.json.example); schema-1
+candidate files remain supported and are not rewritten. Both examples are
+illustrative formats, not regional checklists. Configure
 `BIRD_RECOGNITION_BIOCLIP_MODEL_DIR`, `BIRD_RECOGNITION_SPECIES_LIST`, and the
 required private `BIRD_RECOGNITION_DATABASE_URL` in ignored `.env`, or supply the
 supported command options. `BIRD_RECOGNITION_SPECIES_THRESHOLD` defaults to `0.5`;

@@ -207,15 +207,64 @@ class EmbeddingModelRecord:
 
 @dataclass(frozen=True, slots=True)
 class SpeciesCandidate:
-    """One explicitly configured species identifier and display name."""
+    """One explicitly configured species or coarse-category candidate."""
 
     id: str
-    name: str
+    name: str | None = None
+    kind: Literal["species", "category"] = "species"
+    common_name: str | None = None
+    taxonomic_description: str | None = None
+    category: Literal["bird", "mammal"] | None = None
+
+    def __post_init__(self) -> None:
+        candidate_id = self.id.strip() if isinstance(self.id, str) else ""
+        if not candidate_id or candidate_id.casefold() == "unknown":
+            raise EmbedValidationError("candidate ID must be nonblank and not unknown")
+        object.__setattr__(self, "id", candidate_id)
+        if self.kind not in ("species", "category"):
+            raise EmbedValidationError("candidate kind must be species or category")
+        common_name = self.common_name
+        name = self.name
+        if common_name is None and name is not None:
+            common_name = name
+        if name is None and common_name is not None:
+            name = common_name
+        if name is None or common_name is None:
+            raise EmbedValidationError("candidate name or common name is required")
+        if name.strip() != common_name.strip():
+            raise EmbedValidationError("candidate name and common name must match")
+        for field_name, value in (("name", name), ("common name", common_name)):
+            if value is not None:
+                if not isinstance(value, str) or not value.strip():
+                    raise EmbedValidationError(
+                        f"candidate {field_name} must not be blank"
+                    )
+        if common_name is not None:
+            common_name = common_name.strip()
+            name = common_name
+        if self.taxonomic_description is not None:
+            if (
+                not isinstance(self.taxonomic_description, str)
+                or not self.taxonomic_description.strip()
+            ):
+                raise EmbedValidationError(
+                    "candidate taxonomic description must not be blank"
+                )
+            object.__setattr__(
+                self, "taxonomic_description", self.taxonomic_description.strip()
+            )
+        if self.kind == "category":
+            if self.category not in ("bird", "mammal"):
+                raise EmbedValidationError("category candidates require bird or mammal")
+        elif self.category is not None:
+            raise EmbedValidationError("species candidates cannot have a category")
+        object.__setattr__(self, "common_name", common_name)
+        object.__setattr__(self, "name", name)
 
 
 @dataclass(frozen=True, slots=True)
 class SpeciesCandidateSet:
-    """Canonical, versioned nonempty set of species candidates."""
+    """Canonical, versioned nonempty set of typed candidates."""
 
     candidate_set_fingerprint: Sha256
     schema_version: int
@@ -226,10 +275,45 @@ class SpeciesCandidateSet:
 
     def __post_init__(self) -> None:
         _validate_sha256("candidate_set_fingerprint", self.candidate_set_fingerprint)
-        if self.schema_version != 1:
+        if type(self.schema_version) is not int or self.schema_version not in (1, 2):
             raise EmbedValidationError("unsupported candidate-set schema version")
         if not self.candidates:
             raise EmbedValidationError("candidate set must not be empty")
+        candidate_ids = [candidate.id.casefold() for candidate in self.candidates]
+        candidate_names = [
+            (candidate.common_name or candidate.name or "").casefold()
+            for candidate in self.candidates
+        ]
+        if len(set(candidate_ids)) != len(candidate_ids):
+            raise EmbedValidationError("candidate IDs must be unique")
+        if len(set(candidate_names)) != len(candidate_names):
+            raise EmbedValidationError("candidate names must be unique")
+        if self.schema_version == 1:
+            if any(
+                candidate.kind != "species"
+                or candidate.name is None
+                or candidate.taxonomic_description is not None
+                or candidate.category is not None
+                for candidate in self.candidates
+            ):
+                raise EmbedValidationError("schema-1 candidates must use legacy names")
+            return
+        if any(
+            candidate.common_name is None or candidate.taxonomic_description is None
+            for candidate in self.candidates
+        ):
+            raise EmbedValidationError(
+                "schema-2 candidates require common names and taxonomic descriptions"
+            )
+        categories = [
+            candidate.category
+            for candidate in self.candidates
+            if candidate.kind == "category"
+        ]
+        if sorted(categories) != ["bird", "mammal"]:
+            raise EmbedValidationError(
+                "schema-2 candidate sets require one bird and one mammal category"
+            )
 
 
 @dataclass(frozen=True, slots=True)
@@ -596,6 +680,9 @@ class ProcessingRun:
     scoring_fingerprint: Sha256 | None = None
     threshold: float | None = None
     candidate_count: int = 0
+    candidate_schema_version: int = 1
+    prompt_template: str = "a photo of {name}."
+    prompt_version: str = "species-photo-v1"
 
     def __post_init__(self) -> None:
         _validate_sha256("config_fingerprint", self.config_fingerprint)
@@ -628,6 +715,10 @@ class ProcessingRun:
             raise EmbedValidationError("run threshold must be finite and within [0, 1]")
         if self.candidate_count < 0:
             raise EmbedValidationError("candidate count must be non-negative")
+        if self.candidate_schema_version not in (1, 2):
+            raise EmbedValidationError("unsupported candidate schema version")
+        if not self.prompt_template or not self.prompt_version:
+            raise EmbedValidationError("candidate prompt identity is required")
         if (
             self.completed_count + self.skipped_count + self.failed_count
             > self.selected_count

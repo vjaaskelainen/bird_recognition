@@ -54,10 +54,10 @@ No separate blocking foundational tasks are required.
 
 ### Implementation and tests for User Story 2
 
-- [ ] T006 [P] [US2] Add typed species/category candidate representations and canonical candidate-set content in `src/bird_recognition/embed/models.py`; test required fields, stable IDs, uniqueness, supported kinds, and schema-1 compatibility in `tests/unit/embed/test_models.py`.
-- [ ] T007 [US2] Parse strict schema-2 species files, reject duplicate JSON keys/unknown fields, generate the exact versioned common-name-plus-taxonomy prompt, and fingerprint prompt/candidate content in `src/bird_recognition/embed/config.py`; test order stability, content changes, broad bird/mammal requirements, and legacy prompt identity in `tests/unit/embed/test_config.py`.
-- [ ] T008 [US2] Thread typed candidates and prompt identity through indexing, persisted score maps, and inspection output in `src/bird_recognition/embed/pipeline.py`, `src/bird_recognition/embed/storage.py`, and `src/bird_recognition/cli.py`; test that a category assignment is explicitly coarse and absent species candidates remain measurable in `tests/unit/embed/test_pipeline.py` and `tests/unit/embed/test_evaluation.py`.
-- [ ] T009 [US2] Update the example candidate file and user-facing candidate/prompt documentation in `species.json.example` and `docs/usage.md`; retain the old schema-1 example/reading path as a reproducible baseline.
+- [X] T006 [P] [US2] Add typed species/category candidate representations and canonical candidate-set content in `src/bird_recognition/embed/models.py`; test required fields, stable IDs, uniqueness, supported kinds, and schema-1 compatibility in `tests/unit/embed/test_models.py`.
+- [X] T007 [US2] Parse strict schema-2 species files, reject duplicate JSON keys/unknown fields, generate the exact versioned common-name-plus-taxonomy prompt, and fingerprint prompt/candidate content in `src/bird_recognition/embed/config.py`; test order stability, content changes, broad bird/mammal requirements, and legacy prompt identity in `tests/unit/embed/test_config.py`.
+- [X] T008 [US2] Thread typed candidates and prompt identity through indexing, persisted score maps, and inspection output in `src/bird_recognition/embed/pipeline.py`, `src/bird_recognition/embed/storage.py`, and `src/bird_recognition/cli.py`; test that a category assignment is explicitly coarse and absent species candidates remain measurable in `tests/unit/embed/test_pipeline.py` and `tests/unit/embed/test_evaluation.py`.
+- [X] T009 [US2] Update the example candidate file and user-facing candidate/prompt documentation in `species.json.example` and `docs/usage.md`; retain the old schema-1 example/reading path as a reproducible baseline.
 
 **Checkpoint**: Candidate vocabulary and prompts can evolve as immutable setups, and broad category predictions cannot be mistaken for species identifications.
 

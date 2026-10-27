@@ -79,13 +79,14 @@ def build_tagging_config(
 ) -> TaggingConfig:
     """Build canonical model, candidate, scoring, and decision identities."""
     validated_threshold = validate_threshold(threshold)
+    prompt_template, prompt_version = _prompt_identity(candidate_set.schema_version)
     scoring = {
         "schema_version": 1,
         "model_fingerprint": model.model_fingerprint,
         "candidate_set_fingerprint": candidate_set.candidate_set_fingerprint,
         "candidates": json.loads(candidate_set.candidates_json),
-        "prompt_template": "a photo of {name}.",
-        "prompt_version": "species-photo-v1",
+        "prompt_template": prompt_template,
+        "prompt_version": prompt_version,
         "effective_logit_scale": model.logit_scale,
         "score_formula": (
             "effective_logit_scale * dot(normalized_image, normalized_text)"
@@ -113,8 +114,8 @@ def build_tagging_config(
         model_fingerprint=model.model_fingerprint,
         candidate_set_fingerprint=candidate_set.candidate_set_fingerprint,
         scoring_fingerprint=scoring_fingerprint,
-        prompt_template="a photo of {name}.",
-        prompt_version="species-photo-v1",
+        prompt_template=prompt_template,
+        prompt_version=prompt_version,
         effective_logit_scale=model.logit_scale,
         scoring_json=scoring_json,
         threshold=validated_threshold,
@@ -135,8 +136,39 @@ def _reject_json_constant(value: str) -> None:
     raise ValueError(f"invalid JSON constant: {value}")
 
 
+def _prompt_identity(schema_version: int) -> tuple[str, str]:
+    if schema_version == 1:
+        return "a photo of {name}.", "species-photo-v1"
+    if schema_version == 2:
+        return (
+            "a photo of {common_name} ({taxonomic_description}).",
+            "species-taxonomy-photo-v2",
+        )
+    raise EmbedValidationError("unsupported candidate-set schema version")
+
+
+def format_candidate_prompt(candidate: SpeciesCandidate, template: str) -> str:
+    """Format the prompt for a candidate using its immutable candidate text."""
+    if "{common_name}" in template and candidate.common_name is None:
+        raise EmbedValidationError("candidate common name is required by its prompt")
+    if "{taxonomic_description}" in template and (
+        candidate.taxonomic_description is None
+    ):
+        raise EmbedValidationError(
+            "candidate taxonomic description is required by its prompt"
+        )
+    try:
+        return template.format(
+            name=candidate.name,
+            common_name=candidate.common_name,
+            taxonomic_description=candidate.taxonomic_description,
+        )
+    except KeyError, ValueError:
+        raise EmbedValidationError("candidate prompt template is invalid") from None
+
+
 def load_species_candidates(path: Path) -> SpeciesCandidateSet:
-    """Load and validate a nonempty, canonical species-candidate file."""
+    """Load and validate a canonical schema-1 or schema-2 candidate file."""
     try:
         content = path.read_text(encoding="utf-8")
         document = json.loads(
@@ -149,61 +181,87 @@ def load_species_candidates(path: Path) -> SpeciesCandidateSet:
             "species file is unreadable or invalid UTF-8 JSON"
         ) from None
 
-    if not isinstance(document, dict) or set(document) != {
-        "schema_version",
-        "species",
-    }:
-        raise EmbedValidationError(
-            "species document must contain only schema_version and species"
-        )
-    schema_version = document["schema_version"]
-    if type(schema_version) is not int or schema_version != 1:
+    if not isinstance(document, dict):
+        raise EmbedValidationError("species document must be a JSON object")
+    schema_version = document.get("schema_version")
+    if type(schema_version) is not int or schema_version not in (1, 2):
         raise EmbedValidationError("unsupported species schema version")
-
-    species = document["species"]
-    if not isinstance(species, list) or not species:
-        raise EmbedValidationError("species must be a nonempty array")
+    entry_key = "species" if schema_version == 1 else "candidates"
+    if set(document) != {"schema_version", entry_key}:
+        raise EmbedValidationError(
+            f"schema-{schema_version} document must contain only "
+            f"schema_version and {entry_key}"
+        )
+    values = document[entry_key]
+    if not isinstance(values, list) or not values:
+        raise EmbedValidationError(f"{entry_key} must be a nonempty array")
 
     candidates: list[SpeciesCandidate] = []
     seen_ids: set[str] = set()
     seen_names: set[str] = set()
-    for item in species:
-        if not isinstance(item, dict) or set(item) != {"id", "name"}:
-            raise EmbedValidationError(
-                "each species entry must contain only id and name"
+    for item in values:
+        if not isinstance(item, dict):
+            raise EmbedValidationError("each candidate entry must be an object")
+        if schema_version == 1:
+            if set(item) != {"id", "name"}:
+                raise EmbedValidationError(
+                    "each schema-1 species entry must contain only id and name"
+                )
+            candidate = SpeciesCandidate(id=item["id"], name=item["name"])
+        else:
+            kind = item.get("kind")
+            expected_fields = (
+                {"id", "kind", "common_name", "taxonomic_description", "category"}
+                if kind == "category"
+                else {"id", "kind", "common_name", "taxonomic_description"}
             )
-        candidate_id = item["id"]
-        name = item["name"]
-        if not isinstance(candidate_id, str) or not isinstance(name, str):
-            raise EmbedValidationError("species identifiers and names must be strings")
-        candidate_id = candidate_id.strip()
-        name = name.strip()
-        if not candidate_id or not name:
-            raise EmbedValidationError(
-                "species identifiers and names must not be blank"
+            if set(item) != expected_fields:
+                raise EmbedValidationError(
+                    "schema-2 candidate fields do not match its supported kind"
+                )
+            candidate = SpeciesCandidate(
+                id=item["id"],
+                kind=kind,
+                common_name=item["common_name"],
+                taxonomic_description=item["taxonomic_description"],
+                category=item.get("category"),
             )
+        candidate_id = candidate.id
+        candidate_name = candidate.common_name or ""
         folded_id = candidate_id.casefold()
-        folded_name = name.casefold()
+        folded_name = candidate_name.casefold()
         if folded_id == "unknown":
-            raise EmbedValidationError("the species identifier 'unknown' is reserved")
+            raise EmbedValidationError("the candidate identifier 'unknown' is reserved")
         if folded_id in seen_ids:
-            raise EmbedValidationError("species identifiers must be unique")
+            raise EmbedValidationError("candidate identifiers must be unique")
         if folded_name in seen_names:
-            raise EmbedValidationError("species names must be unique")
+            raise EmbedValidationError("candidate names must be unique")
         seen_ids.add(folded_id)
         seen_names.add(folded_name)
-        candidates.append(SpeciesCandidate(id=candidate_id, name=name))
+        candidates.append(candidate)
 
     candidates.sort(key=lambda candidate: candidate.id)
-    candidate_values = [
-        {"id": candidate.id, "name": candidate.name} for candidate in candidates
-    ]
+    if schema_version == 1:
+        candidate_values = [
+            {"id": candidate.id, "name": candidate.name} for candidate in candidates
+        ]
+    else:
+        candidate_values = [
+            {
+                "id": candidate.id,
+                "kind": candidate.kind,
+                "common_name": candidate.common_name,
+                "taxonomic_description": candidate.taxonomic_description,
+                **({"category": candidate.category} if candidate.category else {}),
+            }
+            for candidate in candidates
+        ]
     candidates_json = canonical_json_bytes(candidate_values).decode("utf-8")
-    canonical_value = {"schema_version": 1, "species": candidate_values}
+    canonical_value = {"schema_version": schema_version, entry_key: candidate_values}
     canonical_json = canonical_json_bytes(canonical_value).decode("utf-8")
     return SpeciesCandidateSet(
         candidate_set_fingerprint=canonical_json_sha256(canonical_value),
-        schema_version=1,
+        schema_version=schema_version,
         candidates=tuple(candidates),
         candidates_json=candidates_json,
         canonical_json=canonical_json,

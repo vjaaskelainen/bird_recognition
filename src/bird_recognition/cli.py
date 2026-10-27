@@ -89,6 +89,38 @@ def _add_case_ids(items: list[dict[str, object]]) -> list[dict[str, object]]:
     return items
 
 
+def _candidate_records(run_data: dict[str, object]) -> list[dict[str, object]]:
+    values = run_data.get("candidates")
+    if isinstance(values, dict):
+        values = values.get("candidates", values.get("species"))
+    if not isinstance(values, list):
+        return []
+    return [value for value in values if isinstance(value, dict)]
+
+
+def _add_candidate_details(
+    run_data: dict[str, object], items: list[dict[str, object]]
+) -> None:
+    records = {record.get("id"): record for record in _candidate_records(run_data)}
+    for item in items:
+        decision = item.get("decision")
+        if not isinstance(decision, dict):
+            continue
+        assigned_id = decision.get("assigned_species_id")
+        candidate = records.get(assigned_id)
+        if candidate is not None:
+            kind = candidate.get("kind", "species")
+            decision["assigned_candidate_kind"] = kind
+            decision["assigned_category"] = candidate.get("category")
+            decision["assigned_candidate"] = candidate
+        scores = decision.get("candidate_scores")
+        if isinstance(scores, list):
+            for score in scores:
+                if isinstance(score, dict) and (record := records.get(score.get("id"))):
+                    score["kind"] = record.get("kind", "species")
+                    score["category"] = record.get("category")
+
+
 def _git_root(path: Path) -> Path | None:
     candidate = path
     while not candidate.exists() and candidate != candidate.parent:
@@ -601,10 +633,11 @@ def _dispatch_embed_command(arguments: argparse.Namespace) -> int:
                 _add_case_ids(items)
                 species_data = run_data.get("candidates", {})
                 species = (
-                    species_data.get("species", [])
+                    species_data.get("candidates", species_data.get("species", []))
                     if isinstance(species_data, dict)
                     else []
                 )
+                _add_candidate_details(run_data, items)
                 warnings = [RELATIVE_CONFIDENCE_WARNING]
                 if len(species) == 1:
                     warnings.append(SINGLE_CANDIDATE_WARNING)
@@ -636,7 +669,12 @@ def _dispatch_embed_command(arguments: argparse.Namespace) -> int:
                 "config_fingerprint": run.config_fingerprint,
                 "model_fingerprint": run.model_fingerprint,
                 "candidate_set_fingerprint": run.candidate_set_fingerprint,
+                "candidate_schema_version": getattr(run, "candidate_schema_version", 1),
                 "scoring_fingerprint": run.scoring_fingerprint,
+                "prompt_template": getattr(
+                    run, "prompt_template", "a photo of {name}."
+                ),
+                "prompt_version": getattr(run, "prompt_version", "species-photo-v1"),
                 "threshold": run.threshold,
                 "counts": {
                     "selected": run.selected_count,

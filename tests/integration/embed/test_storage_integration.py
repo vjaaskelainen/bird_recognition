@@ -203,7 +203,7 @@ def test_database_init_is_transactional_and_idempotent(
     first = initialize_database(disposable_embed_schema)
     second = initialize_database(disposable_embed_schema)
 
-    assert first.schema_version == 1
+    assert first.schema_version == 2
     assert first.vector_available
     assert first.changes_applied
     assert not second.changes_applied
@@ -217,11 +217,17 @@ def test_migration_runner_applies_only_missing_revisions(
     initial_migration = files("bird_recognition.embed").joinpath(
         "migrations", "001_initial.sql"
     )
+    species_migration = files("bird_recognition.embed").joinpath(
+        "migrations", "002_species_classification.sql"
+    )
     (tmp_path / "001_initial.sql").write_text(
         initial_migration.read_text(encoding="utf-8"), encoding="utf-8"
     )
-    (tmp_path / "002_test_marker.sql").write_text(
-        "CREATE TABLE bird_embed.migration_002_test_marker (id integer PRIMARY KEY);",
+    (tmp_path / "002_species_classification.sql").write_text(
+        species_migration.read_text(encoding="utf-8"), encoding="utf-8"
+    )
+    (tmp_path / "003_test_marker.sql").write_text(
+        "CREATE TABLE bird_embed.migration_003_test_marker (id integer PRIMARY KEY);",
         encoding="utf-8",
     )
 
@@ -229,10 +235,55 @@ def test_migration_runner_applies_only_missing_revisions(
         first = apply_pending_migrations(connection, tmp_path)
         second = apply_pending_migrations(connection, tmp_path)
 
-    assert first.version == 2
-    assert first.applied_versions == (2,)
-    assert second.version == 2
+    assert first.version == 3
+    assert first.applied_versions == (3,)
+    assert second.version == 3
     assert second.applied_versions == ()
+
+
+@pytest.mark.real_database
+def test_species_candidate_migration_preserves_legacy_candidate_rows(
+    disposable_embed_schema: str, tmp_path: Path
+) -> None:
+    initial_migration = files("bird_recognition.embed").joinpath(
+        "migrations", "001_initial.sql"
+    )
+    initial_directory = tmp_path / "initial"
+    initial_directory.mkdir()
+    (initial_directory / "001_initial.sql").write_text(
+        initial_migration.read_text(encoding="utf-8"), encoding="utf-8"
+    )
+    with psycopg.connect(disposable_embed_schema, autocommit=True) as connection:
+        apply_pending_migrations(connection, initial_directory)
+        connection.execute(
+            "INSERT INTO bird_embed.candidate_set "
+            "(candidate_set_fingerprint,schema_version,candidates_json,canonical_json) "
+            "VALUES (%s,1,%s,%s)",
+            (
+                "a" * 64,
+                Jsonb([{"id": "raven", "name": "Common raven"}]),
+                Jsonb(
+                    {
+                        "schema_version": 1,
+                        "species": [{"id": "raven", "name": "Common raven"}],
+                    }
+                ),
+            ),
+        )
+        result = apply_pending_migrations(connection)
+        row = connection.execute(
+            "SELECT schema_version,candidates_json,canonical_json "
+            "FROM bird_embed.candidate_set WHERE candidate_set_fingerprint=%s",
+            ("a" * 64,),
+        ).fetchone()
+
+    assert result.version == 2
+    assert result.applied_versions == (2,)
+    assert row == (
+        1,
+        [{"id": "raven", "name": "Common raven"}],
+        {"schema_version": 1, "species": [{"id": "raven", "name": "Common raven"}]},
+    )
 
 
 @pytest.mark.real_database

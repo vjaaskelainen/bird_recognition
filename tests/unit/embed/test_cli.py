@@ -10,7 +10,7 @@ from uuid import UUID, uuid4
 
 import pytest
 
-from bird_recognition.cli import _build_parser, main
+from bird_recognition.cli import _add_candidate_details, _build_parser, main
 from bird_recognition.embed.models import RunStatus
 
 
@@ -41,6 +41,50 @@ def _write_shared_labels(path: Path, case_id: str = "case-1") -> Path:
         encoding="utf-8",
     )
     return path
+
+
+def test_inspection_candidate_details_mark_category_assignments_as_coarse() -> None:
+    run_data: dict[str, object] = {
+        "candidates": {
+            "schema_version": 2,
+            "candidates": [
+                {
+                    "id": "broad_bird",
+                    "kind": "category",
+                    "category": "bird",
+                    "common_name": "Bird",
+                    "taxonomic_description": "An unidentified bird",
+                },
+                {
+                    "id": "great_tit",
+                    "kind": "species",
+                    "common_name": "Great tit",
+                    "taxonomic_description": "Parus major",
+                },
+            ],
+        }
+    }
+    items: list[dict[str, object]] = [
+        {
+            "decision": {
+                "assigned_species_id": "broad_bird",
+                "candidate_scores": [
+                    {"id": "broad_bird", "logit": 1.0, "score": 0.7},
+                    {"id": "great_tit", "logit": 0.0, "score": 0.3},
+                ],
+            }
+        }
+    ]
+
+    _add_candidate_details(run_data, items)
+
+    decision = items[0]["decision"]
+    assert isinstance(decision, dict)
+    assert decision["assigned_candidate_kind"] == "category"
+    assert decision["assigned_category"] == "bird"
+    assert decision["assigned_candidate"]["common_name"] == "Bird"
+    assert decision["candidate_scores"][0]["kind"] == "category"
+    assert decision["candidate_scores"][1]["kind"] == "species"
 
 
 def test_cli_parser_exposes_story_one_commands_and_exact_selection_options() -> None:
@@ -466,7 +510,10 @@ def test_cli_index_emits_required_summary_keys_without_assets(
         "config_fingerprint",
         "model_fingerprint",
         "candidate_set_fingerprint",
+        "candidate_schema_version",
         "scoring_fingerprint",
+        "prompt_template",
+        "prompt_version",
         "threshold",
         "counts",
         "failures",
@@ -474,6 +521,8 @@ def test_cli_index_emits_required_summary_keys_without_assets(
         "durable_status_confirmed",
         "unconfirmed_crop_ids",
     } <= set(payload)
+    assert payload["candidate_schema_version"] == 1
+    assert payload["prompt_version"] == "species-photo-v1"
 
 
 def test_cli_index_resolves_process_environment_and_dotenv_values(

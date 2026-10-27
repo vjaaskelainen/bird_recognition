@@ -306,7 +306,14 @@ class PgVectorStore:
                     else json.loads(candidates_json)
                 )
                 candidates = tuple(
-                    SpeciesCandidate(value["id"], value["name"])
+                    SpeciesCandidate(
+                        id=value["id"],
+                        name=value.get("name"),
+                        kind=value.get("kind", "species"),
+                        common_name=value.get("common_name"),
+                        taxonomic_description=value.get("taxonomic_description"),
+                        category=value.get("category"),
+                    )
                     for value in candidate_values
                 )
                 validate_decision(decision, candidates, threshold=threshold)
