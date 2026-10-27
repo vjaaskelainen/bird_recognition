@@ -269,11 +269,52 @@ def test_species_candidate_migration_preserves_legacy_candidate_rows(
                 ),
             ),
         )
+        snapshot_id, model_fingerprint, config_fingerprint, run_id = (
+            _insert_representation_prerequisites(connection)
+        )
+        register_vector(connection)
+        now = datetime.now(UTC)
+        representation_id = uuid4()
+        connection.execute(
+            "INSERT INTO bird_embed.crop_representation "
+            "(representation_id,snapshot_id,model_fingerprint,embedding,processed_at,"
+            "created_run_id) VALUES (%s,%s,%s,%s,%s,%s)",
+            (
+                representation_id,
+                snapshot_id,
+                model_fingerprint,
+                Vector([1.0] + [0.0] * 511),
+                now,
+                run_id,
+            ),
+        )
+        decision_id = uuid4()
+        connection.execute(
+            "INSERT INTO bird_embed.species_decision "
+            "(decision_id,representation_id,config_fingerprint,assigned_species_id,"
+            "best_candidate_id,confidence,tied_candidate_ids,candidate_scores_json,"
+            "reason,warnings_json,processed_at,created_run_id) "
+            "VALUES (%s,%s,%s,'bird','bird',1,'[]',%s,'assigned','[]',%s,%s)",
+            (
+                decision_id,
+                representation_id,
+                config_fingerprint,
+                Jsonb([{"id": "bird", "logit": 1, "score": 1}]),
+                now,
+                run_id,
+            ),
+        )
         result = apply_pending_migrations(connection)
         row = connection.execute(
             "SELECT schema_version,candidates_json,canonical_json "
             "FROM bird_embed.candidate_set WHERE candidate_set_fingerprint=%s",
             ("a" * 64,),
+        ).fetchone()
+        decision_row = connection.execute(
+            "SELECT decision_id,assigned_species_id,reason,decision_path,"
+            "reference_set_fingerprint FROM bird_embed.species_decision "
+            "WHERE decision_id=%s",
+            (decision_id,),
         ).fetchone()
 
     latest_version = latest_migration_version()
@@ -284,6 +325,7 @@ def test_species_candidate_migration_preserves_legacy_candidate_rows(
         [{"id": "raven", "name": "Common raven"}],
         {"schema_version": 1, "species": [{"id": "raven", "name": "Common raven"}]},
     )
+    assert decision_row == (decision_id, "bird", "assigned", "zero_shot", None)
 
 
 @pytest.mark.real_database

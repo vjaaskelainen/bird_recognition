@@ -1439,3 +1439,117 @@ def test_cli_aggregate_visits_requires_explicit_run_groups_and_output() -> None:
         parser.parse_args(["aggregate-visits"])
 
     assert missing_arguments.value.code == 2
+
+
+def test_cli_evaluates_baseline_then_compares_revision_on_shared_labels(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+) -> None:
+    from bird_recognition.embed import storage
+
+    run_ids = (
+        UUID("00000000-0000-0000-0000-000000000001"),
+        UUID("00000000-0000-0000-0000-000000000002"),
+    )
+    run_records = {
+        run_id: (
+            {
+                "run_id": str(run_id),
+                "status": "complete",
+                "counts": {"selected": 1},
+                "model_fingerprint": f"{index}" * 64,
+                "candidate_set_fingerprint": f"{index + 2}" * 64,
+                "scoring_fingerprint": f"{index + 4}" * 64,
+                "config_fingerprint": f"{index + 6}" * 64,
+                "threshold": 0.5,
+                "candidates": {
+                    "schema_version": 1,
+                    "species": [{"id": "bird", "name": "Bird"}],
+                },
+            },
+            [
+                {
+                    "crop_id": f"crop-{index}",
+                    "case_id": "case-1",
+                    "status": "completed",
+                    "lighting": "day",
+                    "decision": {
+                        "assigned_species_id": "bird",
+                        "reason": "assigned",
+                    },
+                }
+            ],
+        )
+        for index, run_id in enumerate(run_ids, start=1)
+    }
+
+    class ReadOnlyStore:
+        def __init__(self, database_url: str) -> None:
+            assert database_url == "postgresql://bird@localhost/bird_db"
+
+        def preflight(self, *, read_only: bool = False) -> None:
+            assert read_only
+
+        def inspect_run(
+            self, selected_run_id: UUID, crop_id: str | None = None
+        ) -> tuple[dict[str, object], list[dict[str, object]]]:
+            assert crop_id is None
+            return run_records[selected_run_id]
+
+        def close(self) -> None:
+            return None
+
+    monkeypatch.setattr(storage, "PgVectorStore", ReadOnlyStore)
+    labels = _write_shared_labels(tmp_path / "held-out-labels.json")
+    baseline_report_path = tmp_path / "baseline-evaluation.json"
+    database_args = ["--database-url", "postgresql://bird@localhost/bird_db"]
+
+    baseline_result = main(
+        [
+            "evaluate-species",
+            "--run-id",
+            str(run_ids[0]),
+            "--labels",
+            str(labels),
+            "--output",
+            str(baseline_report_path),
+            *database_args,
+            "--json",
+        ]
+    )
+
+    baseline_output = json.loads(capsys.readouterr().out)
+    baseline_report = json.loads(baseline_report_path.read_text(encoding="utf-8"))
+    comparison_report_path = tmp_path / "candidate-comparison.json"
+    comparison_result = main(
+        [
+            "compare-species",
+            "--run-id",
+            str(run_ids[0]),
+            "--run-id",
+            str(run_ids[1]),
+            "--labels",
+            str(labels),
+            "--output",
+            str(comparison_report_path),
+            *database_args,
+            "--json",
+        ]
+    )
+
+    comparison_output = json.loads(capsys.readouterr().out)
+    comparison_report = json.loads(comparison_report_path.read_text(encoding="utf-8"))
+    assert baseline_result == 0
+    assert comparison_result == 0
+    assert baseline_output["status"] == "evaluated"
+    assert comparison_output["status"] == "compared"
+    assert (
+        baseline_report["label_set"]["sha256"]
+        == comparison_report["label_set"]["sha256"]
+    )
+    assert baseline_report["run"]["groups"]["day"]["species_correct_count"] == 1
+    assert comparison_report["paired_case_count"] == 1
+    assert [setup["run_id"] for setup in comparison_report["setups"]] == [
+        str(run_id) for run_id in run_ids
+    ]

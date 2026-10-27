@@ -15,6 +15,7 @@ from bird_recognition.embed.evaluation import (
     build_benchmark_report,
     build_comparison_report,
     build_evaluation_report,
+    load_label_file,
     write_evaluation_report,
 )
 from bird_recognition.embed.models import (
@@ -554,6 +555,12 @@ def test_shared_labels_are_candidate_independent_and_tuning_never_publication_re
         "tuning_labels_cannot_support_publication_quality_claims"
         in report["run"]["sample_limitations"]
     )
+    assert "unfamiliar species may receive high relative scores" in report["warnings"]
+    assert (
+        "classification results may differ substantially between day and night"
+        in report["warnings"]
+    )
+    assert str(labels_path) not in json.dumps(report)
 
 
 def test_shared_metrics_use_null_denominators_and_count_low_quality_separately(
@@ -802,6 +809,24 @@ def test_evaluation_report_writer_rejects_repository_paths(tmp_path: Path) -> No
 
     with pytest.raises(EmbedValidationError):
         write_evaluation_report({"schema_version": 1}, repository_path)
+
+
+def test_load_label_file_rejects_repository_paths(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import bird_recognition.embed.evaluation as evaluation
+
+    labels_path = tmp_path / "labels.json"
+    labels_path.write_text("{}", encoding="utf-8")
+
+    def inside_repository(path: Path) -> bool:
+        del path
+        return True
+
+    monkeypatch.setattr(evaluation, "_is_inside_git_repository", inside_repository)
+
+    with pytest.raises(EmbedValidationError, match="outside every Git repository"):
+        load_label_file(labels_path)
 
 
 def test_evaluation_report_writer_cleans_temporary_file_after_atomic_failure(
