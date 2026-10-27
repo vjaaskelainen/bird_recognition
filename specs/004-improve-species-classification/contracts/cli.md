@@ -130,6 +130,24 @@ Options: required `--run-id UUID`, `--labels PATH`, `--model-dir PATH`, `--outpu
 
 Options: required `--run-id UUID`, external `--groups PATH`, `--output PATH`; optional `--json`. Group manifest is versioned, names source-video IDs and at least two crop IDs per group, and asserts a confident owner-reviewed visit association. No group is inferred merely from video membership. Reject cross-video or incompatible-setup groups and repeated membership. Combine compatible member logits using the specified deterministic aggregation rule, then reapply the setup threshold and minimum margin. Report visit decisions separately and link every contributing crop and crop-level decision. Crop decisions are never overwritten.
 
+The external group file is strict UTF-8 JSON with no duplicate/unknown fields:
+
+```json
+{
+  "schema_version": 1,
+  "groups": [
+    {
+      "visit_id": "visit-1",
+      "source_video_id": "source-video-1",
+      "crop_ids": ["crop-1", "crop-2"],
+      "association_confident": true
+    }
+  ]
+}
+```
+
+Visit IDs must be unique; crop IDs are unique within and across groups. Each source and crop must match completed decisions in the explicitly selected run. The report retains the group-manifest fingerprint, setup identity, mean candidate logits/scores, reason, and all crop/decision links. Grouping and reports remain local and outside Git.
+
 ## Reference-set manifest and split validation
 
 Reference manifest is external, version 1, and strict JSON with no duplicate/unknown fields. Its top-level fields are `schema_version`, `set_id`, `model_fingerprint`, `input_view_fingerprint`, `review_provenance`, and nonempty `references`. Each reference row contains `crop_id`, nullable `source_video_id`, nullable ISO `recording_day`, reviewed species ID, local `image_path`, and `image_sha256`. The model/input fingerprints must exactly match the loaded local model; image bytes are checked before encoding. The canonical set hash includes sorted records and image content digests but excludes local paths. Reference species IDs must be species candidates, never category candidates. Evaluation crop IDs and selected split keys must be disjoint; default split mode is `source_video`. If source-video identity is unavailable, the owner must explicitly choose `recording_day` and all days must be known and disjoint; otherwise fail closed. Compare cosine similarity to the top five reference examples, retain references meeting `--reference-min-similarity`, and require at least three retained references plus a most-common species fraction meeting `--reference-min-agreement`; otherwise use the general zero-shot decision and record `zero_shot_fallback`. Accepted reference suggestions record `reference_match`. Every result includes decision path, reference-set fingerprint, split mode, similarity/agreement where measurable, and retained neighbor crop IDs. Reference files and images must be outside Git.

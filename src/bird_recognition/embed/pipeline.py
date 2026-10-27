@@ -17,6 +17,7 @@ from bird_recognition.embed.config import (
     format_candidate_prompt,
     load_species_candidates,
     validate_minimum_crop_dimensions,
+    validate_minimum_margin,
     validate_threshold,
 )
 from bird_recognition.embed.manifest import read_manifest_snapshot, resolve_crop_path
@@ -78,6 +79,7 @@ def index_manifest(
     input_view: str = "fit-pad-v1",
     minimum_crop_width: int = 32,
     minimum_crop_height: int = 32,
+    minimum_margin: object = None,
     reference_manifest: Path | None = None,
     reference_split_mode: str = "source_video",
     reference_min_similarity: object = None,
@@ -153,6 +155,7 @@ def index_manifest(
         validated_threshold,
         minimum_crop_width=minimum_crop_width,
         minimum_crop_height=minimum_crop_height,
+        minimum_margin=minimum_margin,
         reference_set_fingerprint=(
             reference_set.fingerprint if reference_set is not None else None
         ),
@@ -189,6 +192,7 @@ def index_crops(
     config: TaggingConfig | None = None,
     minimum_crop_width: int = 32,
     minimum_crop_height: int = 32,
+    minimum_margin: object = None,
     reference_set: ReferenceSet | None = None,
     reference_split_mode: str = "source_video",
     reference_min_similarity: object = None,
@@ -203,6 +207,7 @@ def index_crops(
         validated_threshold,
         minimum_crop_width=minimum_crop_width,
         minimum_crop_height=minimum_crop_height,
+        minimum_margin=minimum_margin,
         reference_set_fingerprint=(
             reference_set.fingerprint if reference_set is not None else None
         ),
@@ -221,6 +226,10 @@ def index_crops(
     if tagging_config.threshold != validated_threshold:
         raise EmbedValidationError(
             "tagging config does not match the selected threshold"
+        )
+    if tagging_config.minimum_margin != validate_minimum_margin(minimum_margin):
+        raise EmbedValidationError(
+            "tagging config does not match the selected minimum margin"
         )
     if reference_set is not None and (
         tagging_config.reference_set_fingerprint != reference_set.fingerprint
@@ -334,6 +343,7 @@ def _run_index(
                 "threshold": config.threshold,
                 "minimum_crop_width": config.minimum_crop_width,
                 "minimum_crop_height": config.minimum_crop_height,
+                "minimum_margin": config.minimum_margin,
                 "model_fingerprint": model_identity.model_fingerprint,
                 "candidate_set_fingerprint": candidates.candidate_set_fingerprint,
             },
@@ -350,6 +360,7 @@ def _run_index(
         prompt_version=config.prompt_version,
         reference_set_fingerprint=config.reference_set_fingerprint,
         reference_split_mode=config.reference_split_mode,
+        minimum_margin=config.minimum_margin,
     )
     pending_items = tuple(
         RunItem(
@@ -483,6 +494,7 @@ def _run_index(
                         compatible_score_map,
                         candidates.candidates,
                         threshold=config.threshold,
+                        minimum_margin=config.minimum_margin,
                     )
                 else:
                     if not low_quality and text_vectors is None:
@@ -533,6 +545,7 @@ def _run_index(
                             candidates.candidates,
                             logit_scale=config.effective_logit_scale,
                             threshold=config.threshold,
+                            minimum_margin=config.minimum_margin,
                         )
                 reference_match: ReferenceMatch | None = None
                 if reference_set is not None:
@@ -798,6 +811,7 @@ def _finalize(
         prompt_version=run.prompt_version,
         reference_set_fingerprint=run.reference_set_fingerprint,
         reference_split_mode=run.reference_split_mode,
+        minimum_margin=run.minimum_margin,
     )
     try:
         store.finalize_run(final_run)
@@ -855,4 +869,5 @@ def _unfinalized_run(
         prompt_version=run.prompt_version,
         reference_set_fingerprint=run.reference_set_fingerprint,
         reference_split_mode=run.reference_split_mode,
+        minimum_margin=run.minimum_margin,
     )

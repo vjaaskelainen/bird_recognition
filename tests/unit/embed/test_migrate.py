@@ -2,7 +2,11 @@ from pathlib import Path
 
 import pytest
 
-from bird_recognition.embed.migrate import MigrationError, discover_migrations
+from bird_recognition.embed.migrate import (
+    MigrationError,
+    discover_migrations,
+    latest_migration_version,
+)
 
 
 def test_discover_migrations_orders_contiguous_revisions(tmp_path: Path) -> None:
@@ -13,6 +17,13 @@ def test_discover_migrations_orders_contiguous_revisions(tmp_path: Path) -> None
     migrations = discover_migrations(tmp_path)
 
     assert [migration.version for migration in migrations] == [1, 2, 3]
+
+
+def test_packaged_margin_migration_is_the_next_contiguous_revision() -> None:
+    migrations = discover_migrations()
+
+    assert latest_migration_version() == 4
+    assert migrations[-1].resource.name == "004_score_margin.sql"
 
 
 @pytest.mark.parametrize(

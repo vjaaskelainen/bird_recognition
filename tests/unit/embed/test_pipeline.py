@@ -167,6 +167,89 @@ def test_index_crops_uses_typed_taxonomy_prompts_and_preserves_coarse_candidate(
     ].kind == ("category")
 
 
+def test_index_crops_withholds_narrow_lead_and_records_margin_setup(
+    tmp_path: Path, model_record: EmbeddingModelRecord
+) -> None:
+    snapshots, crop_root = _new_crops(tmp_path, 1)
+    candidates = load_species_candidates(
+        _candidate_file(
+            tmp_path,
+            [
+                {"id": "bird-a", "name": "Bird A"},
+                {"id": "bird-b", "name": "Bird B"},
+            ],
+        )
+    )
+    state = FakeStoreState()
+
+    run = index_crops(
+        snapshots,
+        crop_root=crop_root,
+        manifest_locator=tmp_path / "manifest.sqlite3",
+        candidates=candidates,
+        model=FakeModel(model_record),
+        store=FakeStore(state),
+        threshold=0.5,
+        minimum_margin=0.5,
+    )
+
+    decision = next(iter(state.decisions.values()))
+    assert decision.assigned_species_id is None
+    assert decision.reason == "below_margin"
+    assert len(decision.candidate_scores) == 2
+    assert run.minimum_margin == 0.5
+    assert state.configs[run.config_fingerprint].minimum_margin == 0.5
+
+
+def test_index_crops_reapplies_margin_from_compatible_persisted_scores(
+    tmp_path: Path, model_record: EmbeddingModelRecord
+) -> None:
+    snapshots, crop_root = _new_crops(tmp_path, 1)
+    candidates = load_species_candidates(
+        _candidate_file(
+            tmp_path,
+            [
+                {"id": "bird-a", "name": "Bird A"},
+                {"id": "bird-b", "name": "Bird B"},
+            ],
+        )
+    )
+    state = FakeStoreState()
+    model = FakeModel(model_record)
+    store = FakeStore(state)
+
+    baseline = index_crops(
+        snapshots,
+        crop_root=crop_root,
+        manifest_locator=tmp_path / "manifest.sqlite3",
+        candidates=candidates,
+        model=model,
+        store=store,
+        threshold=0.5,
+    )
+    inference_counts = (model.image_calls, model.text_calls)
+    margin_run = index_crops(
+        snapshots,
+        crop_root=crop_root,
+        manifest_locator=tmp_path / "manifest.sqlite3",
+        candidates=candidates,
+        model=model,
+        store=store,
+        threshold=0.5,
+        minimum_margin=0.5,
+    )
+    margin_decision = next(
+        decision
+        for decision in state.decisions.values()
+        if decision.config_fingerprint == margin_run.config_fingerprint
+    )
+
+    assert baseline.assigned_count == 1
+    assert margin_run.unknown_count == 1
+    assert margin_decision.reason == "below_margin"
+    assert (model.image_calls, model.text_calls) == inference_counts
+
+
 @pytest.mark.parametrize(
     ("reference_examples", "expected_path", "expected_species"),
     [
@@ -287,6 +370,7 @@ def test_index_crops_persists_100_results_and_restart_inspects_provenance(
         "minimum_crop_height",
         "minimum_crop_width",
         "model_fingerprint",
+        "minimum_margin",
         "threshold",
     }
     assert "private-password" not in run.sanitized_settings_json

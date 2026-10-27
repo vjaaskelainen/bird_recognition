@@ -350,6 +350,11 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     index_parser.add_argument("--minimum-crop-width", type=int, default=32)
     index_parser.add_argument("--minimum-crop-height", type=int, default=32)
+    index_parser.add_argument(
+        "--minimum-margin",
+        type=float,
+        help="optional minimum difference between the top two candidate scores",
+    )
     index_parser.add_argument("--reference-set", type=Path)
     index_parser.add_argument(
         "--reference-split-mode",
@@ -406,6 +411,14 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     benchmark_parser.add_argument("--database-url")
     benchmark_parser.add_argument("--json", action="store_true")
+    visits_parser = commands.add_parser(
+        "aggregate-visits", help="aggregate explicitly grouped crop decisions"
+    )
+    visits_parser.add_argument("--run-id", required=True)
+    visits_parser.add_argument("--groups", required=True, type=Path)
+    visits_parser.add_argument("--output", required=True, type=Path)
+    visits_parser.add_argument("--database-url")
+    visits_parser.add_argument("--json", action="store_true")
     return parser
 
 
@@ -456,6 +469,7 @@ def main(argv: list[str] | None = None, detector: Detector | None = None) -> int
         "evaluate-species",
         "compare-species",
         "benchmark-species",
+        "aggregate-visits",
     }:
         if arguments.command == "compare-species" and len(arguments.run_id) < 2:
             parser.error("compare-species requires at least two --run-id values")
@@ -719,6 +733,40 @@ def _dispatch_embed_command(arguments: argparse.Namespace) -> int:
                 "report": report,
             }
             run = None
+        elif arguments.command == "aggregate-visits":
+            from bird_recognition.embed.evaluation import (
+                validate_report_destination,
+            )
+            from bird_recognition.embed.visits import (
+                build_visit_report,
+                load_visit_group_manifest,
+                write_visit_report,
+            )
+
+            run_id = UUID(arguments.run_id)
+            groups = load_visit_group_manifest(arguments.groups)
+            output_path = validate_report_destination(arguments.output)
+            with closing(PgVectorStore(arguments.database_url)) as store:
+                try:
+                    store.preflight(read_only=True)
+                except StorageError as error:
+                    raise PreflightError(str(error)) from None
+                run_data, items = store.inspect_run(run_id)
+                _add_case_ids(items)
+                report = build_visit_report(
+                    run_data,
+                    items,
+                    groups,
+                    expected_run_id=run_id,
+                )
+                saved_path = write_visit_report(report, output_path)
+            payload = {
+                "schema_version": 1,
+                "status": "aggregated",
+                "output": str(saved_path),
+                "report": report,
+            }
+            run = None
         elif arguments.command == "inspect":
             store = PgVectorStore(arguments.database_url)
             try:
@@ -765,6 +813,7 @@ def _dispatch_embed_command(arguments: argparse.Namespace) -> int:
                 input_view=arguments.input_view,
                 minimum_crop_width=arguments.minimum_crop_width,
                 minimum_crop_height=arguments.minimum_crop_height,
+                minimum_margin=arguments.minimum_margin,
                 reference_manifest=arguments.reference_set,
                 reference_split_mode=arguments.reference_split_mode,
                 reference_min_similarity=arguments.reference_min_similarity,
@@ -790,6 +839,7 @@ def _dispatch_embed_command(arguments: argparse.Namespace) -> int:
                 "threshold": run.threshold,
                 "minimum_crop_width": arguments.minimum_crop_width,
                 "minimum_crop_height": arguments.minimum_crop_height,
+                "minimum_margin": getattr(run, "minimum_margin", None),
                 "input_view": arguments.input_view,
                 "counts": {
                     "selected": run.selected_count,
@@ -836,6 +886,9 @@ def _dispatch_embed_command(arguments: argparse.Namespace) -> int:
         elif arguments.command == "compare-species":
             print(f"Comparison report: {payload['output']}")
             print(f"Paired cases: {payload['report']['paired_case_count']}")
+        elif arguments.command == "aggregate-visits":
+            print(f"Visit report: {payload['output']}")
+            print(f"Visit groups: {payload['report']['visit_count']}")
         else:
             print(json.dumps(payload, ensure_ascii=False, indent=2, default=str))
         if run is not None and (

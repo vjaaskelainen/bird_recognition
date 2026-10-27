@@ -79,6 +79,7 @@ def build_tagging_config(
     *,
     minimum_crop_width: int = 32,
     minimum_crop_height: int = 32,
+    minimum_margin: object = None,
     reference_set_fingerprint: Sha256 | None = None,
     reference_split_mode: str | None = None,
     reference_min_similarity: object = None,
@@ -87,6 +88,9 @@ def build_tagging_config(
     """Build canonical model, candidate, scoring, and decision identities."""
     validated_threshold = validate_threshold(threshold)
     validate_minimum_crop_dimensions(minimum_crop_width, minimum_crop_height)
+    validated_margin = validate_minimum_margin(minimum_margin)
+    if validated_margin is not None and len(candidate_set.candidates) < 2:
+        raise EmbedValidationError("minimum margin requires at least two candidates")
     reference_values = (
         reference_set_fingerprint,
         reference_split_mode,
@@ -143,6 +147,7 @@ def build_tagging_config(
         "scoring_fingerprint": scoring_fingerprint,
         "scoring": scoring,
         "threshold": validated_threshold,
+        "minimum_margin": validated_margin,
         "minimum_crop_width": minimum_crop_width,
         "minimum_crop_height": minimum_crop_height,
     }
@@ -159,6 +164,7 @@ def build_tagging_config(
         effective_logit_scale=model.logit_scale,
         scoring_json=scoring_json,
         threshold=validated_threshold,
+        minimum_margin=validated_margin,
         canonical_json=canonical_json,
         minimum_crop_width=minimum_crop_width,
         minimum_crop_height=minimum_crop_height,
@@ -192,6 +198,23 @@ def validate_minimum_crop_dimensions(width: object, height: object) -> tuple[int
     if type(width) is not int or type(height) is not int or width <= 0 or height <= 0:
         raise EmbedValidationError("minimum crop dimensions must be positive integers")
     return width, height
+
+
+def validate_minimum_margin(value: object = None) -> float | None:
+    """Validate an optional candidate-relative score margin in [0, 1]."""
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, (int, float, str)):
+        raise EmbedValidationError("minimum margin must be finite and within [0, 1]")
+    try:
+        margin = float(value)
+    except OverflowError, ValueError:
+        raise EmbedValidationError(
+            "minimum margin must be finite and within [0, 1]"
+        ) from None
+    if not math.isfinite(margin) or not 0 <= margin <= 1:
+        raise EmbedValidationError("minimum margin must be finite and within [0, 1]")
+    return 0.0 if margin == 0 else margin
 
 
 def _reject_duplicate_json_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
@@ -372,6 +395,7 @@ def resolve_embed_configuration(
         "evaluate-species": ("database_url",),
         "compare-species": ("database_url",),
         "benchmark-species": ("database_url",),
+        "aggregate-visits": ("database_url",),
         "search": ("database_url", "model_dir"),
     }
     if command not in required_by_command:

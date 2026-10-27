@@ -332,6 +332,7 @@ class TaggingConfig:
     canonical_json: str
     minimum_crop_width: int = 32
     minimum_crop_height: int = 32
+    minimum_margin: float | None = None
     reference_set_fingerprint: Sha256 | None = None
     reference_split_mode: Literal["source_video", "recording_day"] | None = None
     reference_min_similarity: float | None = None
@@ -362,6 +363,15 @@ class TaggingConfig:
         ):
             raise EmbedValidationError(
                 "minimum crop dimensions must be positive integers"
+            )
+        if self.minimum_margin is not None and (
+            isinstance(self.minimum_margin, bool)
+            or not isinstance(self.minimum_margin, (int, float))
+            or not math.isfinite(self.minimum_margin)
+            or not 0 <= self.minimum_margin <= 1
+        ):
+            raise EmbedValidationError(
+                "minimum margin must be finite and within [0, 1]"
             )
         reference_values = (
             self.reference_set_fingerprint,
@@ -437,6 +447,15 @@ class SpeciesDecision:
 
     def __post_init__(self) -> None:
         _validate_sha256("config_fingerprint", self.config_fingerprint)
+        if self.reason not in {
+            "assigned",
+            "below_threshold",
+            "below_margin",
+            "exact_tie",
+            "low_quality",
+            "reference_match",
+        }:
+            raise EmbedValidationError("decision reason is invalid")
         if self.decision_path not in {
             "zero_shot",
             "reference_match",
@@ -803,6 +822,7 @@ class ProcessingRun:
     prompt_version: str = "species-photo-v1"
     reference_set_fingerprint: Sha256 | None = None
     reference_split_mode: Literal["source_video", "recording_day"] | None = None
+    minimum_margin: float | None = None
 
     def __post_init__(self) -> None:
         _validate_sha256("config_fingerprint", self.config_fingerprint)
@@ -833,6 +853,13 @@ class ProcessingRun:
             not math.isfinite(self.threshold) or not 0 <= self.threshold <= 1
         ):
             raise EmbedValidationError("run threshold must be finite and within [0, 1]")
+        if self.minimum_margin is not None and (
+            isinstance(self.minimum_margin, bool)
+            or not isinstance(self.minimum_margin, (int, float))
+            or not math.isfinite(self.minimum_margin)
+            or not 0 <= self.minimum_margin <= 1
+        ):
+            raise EmbedValidationError("run minimum margin is invalid")
         if self.candidate_count < 0:
             raise EmbedValidationError("candidate count must be non-negative")
         if self.candidate_schema_version not in (1, 2):

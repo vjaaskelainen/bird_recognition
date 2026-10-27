@@ -94,9 +94,25 @@ Use synthetic generated image tests for these geometry and resize/pad checks. Do
 
 ## 4. Validate thresholds, reference fallback, visit grouping, and benchmark reporting
 
-- **Margin**: Use controlled score maps for a unique clear lead, narrow lead above threshold, below-threshold lead, and exact tie. The configured minimum margin is independent of threshold; below-threshold, below-margin, and tied decisions remain unassigned with reason and competing scores inspectable. Confirm threshold-only/margin-only changes preserve compatible vectors and old decisions.
+- **Margin**: Use controlled score maps for a unique clear lead, narrow lead above threshold, below-threshold lead, and exact tie. Configure `index --minimum-margin <score-gap>` independently of `--threshold`; below-threshold, below-margin, and tied decisions remain unassigned with reason and competing scores inspectable. Confirm threshold-only/margin-only changes preserve compatible vectors and old decisions.
 - **Reference mode**: Create generated reference/evaluation fixtures with distinct source IDs and days. The external version-1 reference manifest records exact model/input-view fingerprints, reviewed species IDs, image SHA-256 values, source/day provenance, and local image locators. Enable it explicitly with `index --reference-set <manifest> --reference-min-similarity 0.8 --reference-min-agreement 0.75`; choose `--reference-split-mode recording_day` only when source-video identity cannot be verified and every day is known. Confirm overlap is rejected before encoding; an adequate same-label match may suggest a species; weak or inconsistent references use and identify `zero_shot_fallback`. Inspect the saved run to verify reference-set and per-decision provenance. Confirm no network/live service is needed.
-- **Visit mode**: Provide explicit, confident groups from one source video with compatible setup. Confirm arithmetic-mean logits are rechecked using threshold/margin, every contributor crop/decision is linked, and per-crop decisions are unchanged. Reject cross-video or uncertain groups; same-video membership alone is insufficient.
+- **Visit mode**: Provide an external version-1 group file, explicitly marking each owner-reviewed association as confident:
+
+  ```json
+  {
+    "schema_version": 1,
+    "groups": [
+      {
+        "visit_id": "visit-1",
+        "source_video_id": "source-video-1",
+        "crop_ids": ["crop-1", "crop-2"],
+        "association_confident": true
+      }
+    ]
+  }
+  ```
+
+  Run `aggregate-visits --run-id <run-id> --groups <external-groups.json> --output <external-report.json> --json`. Confirm arithmetic-mean logits are rechecked using threshold/margin, every contributor crop/decision is linked, and per-crop decisions are unchanged. Reject cross-video or uncertain groups; same-video membership alone is insufficient.
 - **Benchmark**: Select a held-out shared label cohort and an explicitly selected supported local BioCLIP asset directory. Run `benchmark-species --run-id <run-id> --labels <external-labels.json> --model-dir <local-assets> --max-crops 40 --output <external-report.json> --json`. Confirm the deterministic sample cap, sample/setup identity, quality measures, and elapsed time are reported, and that selected/default configuration remains unchanged. No unsupported model is fetched or silently substituted.
 
 These are controlled correctness checks, not biological-quality evidence. Quality claims require a reviewed real cohort held out by source video/day from setup selection/tuning and must separately report day and night. Held-out evaluation labels must be marked `held_out_evaluation`; tuning labels cannot support publication-quality claims.

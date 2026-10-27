@@ -269,7 +269,12 @@ class FakeStore:
             else None
         )
         if candidate_set is not None:
-            validate_decision(decision, candidate_set.candidates)
+            validate_decision(
+                decision,
+                candidate_set.candidates,
+                threshold=config.threshold,
+                minimum_margin=config.minimum_margin,
+            )
         key = (item.run_id, item.crop_id)
         pending_item = self.state.items.get(key)
         if pending_item is None or pending_item.status is not RunItemStatus.PENDING:

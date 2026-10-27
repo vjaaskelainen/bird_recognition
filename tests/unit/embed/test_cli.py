@@ -102,6 +102,7 @@ def test_cli_parser_exposes_story_one_commands_and_exact_selection_options() -> 
         "evaluate-species",
         "compare-species",
         "benchmark-species",
+        "aggregate-visits",
     }
     with pytest.raises(SystemExit) as usage_error:
         parser.parse_args(["inspect"])
@@ -130,6 +131,24 @@ def test_cli_index_accepts_versioned_input_view_and_quality_dimensions() -> None
     assert arguments.input_view == "fit-pad-v1"
     assert arguments.minimum_crop_width == 48
     assert arguments.minimum_crop_height == 40
+
+
+def test_cli_index_accepts_optional_minimum_margin() -> None:
+    arguments = _build_parser().parse_args(
+        [
+            "index",
+            "--manifest",
+            "manifest.sqlite3",
+            "--species-list",
+            "species.json",
+            "--model-dir",
+            "models",
+            "--minimum-margin",
+            "0.12",
+        ]
+    )
+
+    assert arguments.minimum_margin == 0.12
 
 
 def test_cli_index_accepts_reference_manifest_and_explicit_matching_criteria() -> None:
@@ -1269,3 +1288,154 @@ def test_cli_evaluate_species_database_read_failure_is_operational(
     assert result == 1
     assert payload["status"] == "operational_failure"
     assert not output_path.exists()
+
+
+def test_cli_aggregate_visits_writes_separate_linked_report(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+) -> None:
+    from bird_recognition.embed import storage
+
+    run_id = UUID("00000000-0000-0000-0000-000000000001")
+    inspected: list[UUID] = []
+
+    class ReadOnlyStore:
+        def __init__(self, database_url: str) -> None:
+            assert database_url == "postgresql://bird@localhost/bird_db"
+
+        def preflight(self, *, read_only: bool = False) -> None:
+            assert read_only
+
+        def inspect_run(
+            self, selected_run_id: UUID, crop_id: str | None = None
+        ) -> tuple[dict[str, object], list[dict[str, object]]]:
+            assert crop_id is None
+            inspected.append(selected_run_id)
+            return (
+                {
+                    "run_id": str(run_id),
+                    "status": "complete",
+                    "config_fingerprint": "1" * 64,
+                    "model_fingerprint": "2" * 64,
+                    "candidate_set_fingerprint": "3" * 64,
+                    "threshold": 0.5,
+                    "config": {"minimum_margin": None},
+                    "candidates": {
+                        "schema_version": 1,
+                        "species": [
+                            {"id": "a", "name": "A"},
+                            {"id": "b", "name": "B"},
+                        ],
+                    },
+                },
+                [
+                    {
+                        "crop_id": crop_id,
+                        "status": "completed",
+                        "provenance": {"source_id": "source-1"},
+                        "decision": {
+                            "decision_id": f"decision-{index}",
+                            "config_fingerprint": "1" * 64,
+                            "reason": "assigned",
+                            "candidate_scores": scores,
+                        },
+                    }
+                    for index, (crop_id, scores) in enumerate(
+                        [
+                            (
+                                "crop-1",
+                                [
+                                    {
+                                        "id": "a",
+                                        "logit": 1.0,
+                                        "score": 0.7310585786300049,
+                                    },
+                                    {
+                                        "id": "b",
+                                        "logit": 0.0,
+                                        "score": 0.2689414213699951,
+                                    },
+                                ],
+                            ),
+                            (
+                                "crop-2",
+                                [
+                                    {
+                                        "id": "a",
+                                        "logit": 0.0,
+                                        "score": 0.2689414213699951,
+                                    },
+                                    {
+                                        "id": "b",
+                                        "logit": 1.0,
+                                        "score": 0.7310585786300049,
+                                    },
+                                ],
+                            ),
+                        ],
+                        start=1,
+                    )
+                ],
+            )
+
+        def close(self) -> None:
+            return None
+
+    monkeypatch.setattr(storage, "PgVectorStore", ReadOnlyStore)
+    groups = tmp_path / "groups.json"
+    groups.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "groups": [
+                    {
+                        "visit_id": "visit-1",
+                        "source_video_id": "source-1",
+                        "crop_ids": ["crop-1", "crop-2"],
+                        "association_confident": True,
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    output_path = tmp_path / "visits.json"
+
+    result = main(
+        [
+            "aggregate-visits",
+            "--run-id",
+            str(run_id),
+            "--groups",
+            str(groups),
+            "--output",
+            str(output_path),
+            "--database-url",
+            "postgresql://bird@localhost/bird_db",
+            "--json",
+        ]
+    )
+
+    output = capsys.readouterr()
+    payload = json.loads(output.out)
+    saved_report = json.loads(output_path.read_text(encoding="utf-8"))
+    assert result == 0
+    assert output.err == ""
+    assert payload["status"] == "aggregated"
+    assert inspected == [run_id]
+    assert saved_report["visit_count"] == 1
+    assert saved_report["visits"][0]["crop_ids"] == ["crop-1", "crop-2"]
+    assert saved_report["visits"][0]["decision_ids"] == [
+        "decision-1",
+        "decision-2",
+    ]
+
+
+def test_cli_aggregate_visits_requires_explicit_run_groups_and_output() -> None:
+    parser = _build_parser()
+
+    with pytest.raises(SystemExit) as missing_arguments:
+        parser.parse_args(["aggregate-visits"])
+
+    assert missing_arguments.value.code == 2

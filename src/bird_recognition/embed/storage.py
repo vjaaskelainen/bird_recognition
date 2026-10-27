@@ -282,7 +282,7 @@ class PgVectorStore:
         try:
             with connection.transaction():
                 context = connection.execute(
-                    "SELECT c.candidates_json,t.threshold "
+                    "SELECT c.candidates_json,t.threshold,t.canonical_json "
                     "FROM bird_embed.processing_run AS r "
                     "JOIN bird_embed.tagging_config AS t USING (config_fingerprint) "
                     "JOIN bird_embed.candidate_set AS c "
@@ -299,7 +299,12 @@ class PgVectorStore:
                     raise StorageError(
                         "crop result configuration does not match its run"
                     )
-                candidates_json, threshold = context
+                candidates_json, threshold, canonical_json = context
+                config_json = (
+                    canonical_json
+                    if isinstance(canonical_json, dict)
+                    else json.loads(canonical_json)
+                )
                 candidate_values = (
                     candidates_json
                     if isinstance(candidates_json, list)
@@ -316,7 +321,12 @@ class PgVectorStore:
                     )
                     for value in candidate_values
                 )
-                validate_decision(decision, candidates, threshold=threshold)
+                validate_decision(
+                    decision,
+                    candidates,
+                    threshold=threshold,
+                    minimum_margin=config_json.get("minimum_margin"),
+                )
                 if representation.snapshot_id != snapshot.snapshot_id:
                     raise EmbedValidationError(
                         "representation snapshot does not match crop"
@@ -575,6 +585,7 @@ class PgVectorStore:
                     raise EmbedValidationError("run selection was not found")
                 sql = (
                     "SELECT i.*,d.decision_id AS saved_decision_id,"
+                    "d.config_fingerprint AS decision_config_fingerprint,"
                     "d.assigned_species_id,d.best_candidate_id,d.confidence,d.reason,"
                     "d.tied_candidate_ids,d.candidate_scores_json,d.warnings_json,"
                     "d.decision_path,d.reference_set_fingerprint,d.reference_split_mode,"
@@ -1093,6 +1104,7 @@ def _item_inspection(row: Any) -> dict[str, object]:
     if row["saved_decision_id"] is not None:
         item["decision"] = {
             "decision_id": str(row["saved_decision_id"]),
+            "config_fingerprint": row["decision_config_fingerprint"].strip(),
             "assigned_species_id": row["assigned_species_id"] or "unknown",
             "best_candidate_id": row["best_candidate_id"],
             "confidence": row["confidence"],

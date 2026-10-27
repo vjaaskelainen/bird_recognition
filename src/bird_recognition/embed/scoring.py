@@ -50,6 +50,7 @@ def score_embeddings(
     *,
     logit_scale: float,
     threshold: float,
+    minimum_margin: float | None = None,
 ) -> ScoreResult:
     """Score normalized embeddings and choose a candidate or unknown."""
     if not candidates or len(candidates) != len(text_vectors):
@@ -96,6 +97,7 @@ def score_embeddings(
         ),
         ordered,
         threshold=threshold,
+        minimum_margin=minimum_margin,
     )
 
 
@@ -104,8 +106,9 @@ def decision_from_score_map(
     candidates: Sequence[SpeciesCandidate],
     *,
     threshold: float,
+    minimum_margin: float | None = None,
 ) -> ScoreResult:
-    """Validate persisted logits/scores and apply a threshold-only retag."""
+    """Validate persisted scores and reapply threshold and optional margin gates."""
     ordered = tuple(sorted(candidates, key=lambda candidate: candidate.id))
     if not ordered or tuple(score.id for score in scores) != tuple(
         candidate.id for candidate in ordered
@@ -118,6 +121,15 @@ def decision_from_score_map(
         or not 0 <= threshold <= 1
     ):
         raise EmbedValidationError("threshold must be finite and within [0, 1]")
+    if minimum_margin is not None and (
+        isinstance(minimum_margin, bool)
+        or not isinstance(minimum_margin, (int, float))
+        or not math.isfinite(minimum_margin)
+        or not 0 <= minimum_margin <= 1
+    ):
+        raise EmbedValidationError("minimum margin must be finite and within [0, 1]")
+    if minimum_margin is not None and len(ordered) < 2:
+        raise EmbedValidationError("minimum margin requires at least two candidates")
     logits = np.asarray([score.logit for score in scores], dtype=np.float64)
     persisted_scores = np.asarray([score.score for score in scores], dtype=np.float64)
     if (
@@ -172,14 +184,25 @@ def decision_from_score_map(
         )
 
     best_id = ordered[tied_indices[0]].id
-    assigned_id = best_id if confidence >= threshold else None
+    assigned_id = best_id
+    reason = "assigned"
+    if confidence < threshold:
+        assigned_id = None
+        reason = "below_threshold"
+    elif minimum_margin is not None:
+        top_two_scores = sorted(
+            (score.score for score in candidate_scores), reverse=True
+        )[:2]
+        if top_two_scores[0] - top_two_scores[1] < minimum_margin:
+            assigned_id = None
+            reason = "below_margin"
     return ScoreResult(
         assigned_species_id=assigned_id,
         best_candidate_id=best_id,
         confidence=confidence,
         tied_candidate_ids=(),
         scores=candidate_scores,
-        reason="assigned" if assigned_id is not None else "below_threshold",
+        reason=reason,
         warnings=warnings,
     )
 
@@ -194,6 +217,7 @@ def validate_decision(
     candidates: Sequence[SpeciesCandidate],
     *,
     threshold: float | None = None,
+    minimum_margin: float | None = None,
 ) -> None:
     """Validate decision fields and all persisted scores against candidates."""
     candidate_ids = tuple(sorted(candidate.id for candidate in candidates))
@@ -257,6 +281,8 @@ def validate_decision(
                 and decision.assigned_species_id == best_id
                 or decision.reason == "below_threshold"
                 and decision.assigned_species_id is None
+                or decision.reason == "below_margin"
+                and decision.assigned_species_id is None
                 or decision.reason == "reference_match"
                 and decision.decision_path == "reference_match"
                 and decision.assigned_species_id in candidate_ids
@@ -282,8 +308,28 @@ def validate_decision(
             and confidence < threshold
             or decision.reason == "below_threshold"
             and confidence >= threshold
+            or decision.reason == "below_margin"
+            and confidence < threshold
         ):
             raise EmbedValidationError("decision reason disagrees with threshold")
+    if decision.reason == "below_margin" or minimum_margin is not None:
+        if minimum_margin is None or (
+            isinstance(minimum_margin, bool)
+            or not isinstance(minimum_margin, (int, float))
+            or not math.isfinite(minimum_margin)
+            or not 0 <= minimum_margin <= 1
+            or len(scores) < 2
+        ):
+            raise EmbedValidationError("decision minimum margin is invalid")
+        top_two_scores = sorted(values, reverse=True)[:2]
+        margin_is_too_narrow = top_two_scores[0] - top_two_scores[1] < minimum_margin
+        if (
+            decision.reason == "below_margin"
+            and not margin_is_too_narrow
+            or decision.reason == "assigned"
+            and margin_is_too_narrow
+        ):
+            raise EmbedValidationError("decision reason disagrees with minimum margin")
     if (
         decision.reason == "reference_match"
         and decision.decision_path != "reference_match"

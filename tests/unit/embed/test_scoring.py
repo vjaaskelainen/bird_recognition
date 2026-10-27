@@ -89,6 +89,76 @@ def test_score_embeddings_does_not_treat_rounded_or_near_logits_as_ties() -> Non
     assert result.tied_candidate_ids == ()
 
 
+def test_score_embeddings_rejects_narrow_lead_after_threshold_passes() -> None:
+    result = score_embeddings(
+        (1.0, 0.0),
+        ((1.0, 0.0), (0.99, 0.1410673598)),
+        (SpeciesCandidate("a", "A"), SpeciesCandidate("b", "B")),
+        logit_scale=1.0,
+        threshold=0.5,
+        minimum_margin=0.1,
+    )
+
+    assert result.assigned_species_id is None
+    assert result.best_candidate_id == "a"
+    assert result.reason == "below_margin"
+    assert len(result.scores) == 2
+
+
+def test_score_embeddings_assigns_clear_lead_that_passes_both_gates() -> None:
+    result = score_embeddings(
+        (1.0, 0.0),
+        ((1.0, 0.0), (0.0, 1.0)),
+        (SpeciesCandidate("a", "A"), SpeciesCandidate("b", "B")),
+        logit_scale=1.0,
+        threshold=0.5,
+        minimum_margin=0.2,
+    )
+
+    assert result.assigned_species_id == "a"
+    assert result.reason == "assigned"
+
+
+def test_score_embeddings_keeps_below_threshold_reason_independent_of_margin() -> None:
+    result = score_embeddings(
+        (1.0, 0.0),
+        ((0.0, 1.0), (1.0, 0.0)),
+        (SpeciesCandidate("a", "A"), SpeciesCandidate("b", "B")),
+        logit_scale=1.0,
+        threshold=0.8,
+        minimum_margin=0.0,
+    )
+
+    assert result.assigned_species_id is None
+    assert result.reason == "below_threshold"
+
+
+def test_score_embeddings_preserves_exact_tie_reason_when_margin_is_enabled() -> None:
+    result = score_embeddings(
+        (1.0, 0.0),
+        ((0.8, 0.6), (0.8, -0.6)),
+        (SpeciesCandidate("a", "A"), SpeciesCandidate("b", "B")),
+        logit_scale=1.0,
+        threshold=0.5,
+        minimum_margin=0.1,
+    )
+
+    assert result.reason == "exact_tie"
+    assert result.tied_candidate_ids == ("a", "b")
+
+
+def test_score_embeddings_rejects_single_candidate_when_margin_is_enabled() -> None:
+    with pytest.raises(EmbedValidationError, match="at least two candidates"):
+        score_embeddings(
+            (1.0, 0.0),
+            ((1.0, 0.0),),
+            (SpeciesCandidate("a", "A"),),
+            logit_scale=1.0,
+            threshold=0.5,
+            minimum_margin=0.1,
+        )
+
+
 def test_score_embeddings_retains_below_threshold_unique_best_as_unknown() -> None:
     result = score_embeddings(
         (1.0, 0.0),
@@ -181,6 +251,7 @@ def test_validate_decision_rejects_nonfinite_scores_and_threshold_disagreement()
     )
 
     validate_decision(decision, candidates, threshold=0.5)
+    validate_decision(decision, candidates, threshold=0.5, minimum_margin=0.1)
     invalid_scores = replace(
         decision,
         candidate_scores=(

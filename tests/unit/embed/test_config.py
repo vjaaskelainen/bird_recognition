@@ -526,6 +526,73 @@ def test_build_tagging_config_keeps_scoring_identity_threshold_independent(
     assert json.loads(retagged.canonical_json)["threshold"] == 0.75
 
 
+def test_build_tagging_config_fingerprints_minimum_margin_separately_from_scores(
+    model_record: EmbeddingModelRecord, tmp_path: Path
+) -> None:
+    candidates = load_species_candidates(
+        _write_species_file(
+            tmp_path / "species.json",
+            json.dumps(
+                _species_document(
+                    [
+                        {"id": "bird-a", "name": "Bird A"},
+                        {"id": "bird-b", "name": "Bird B"},
+                    ]
+                )
+            ),
+        )
+    )
+
+    baseline = build_tagging_config(model_record, candidates)
+    margin_config = build_tagging_config(
+        model_record, candidates, minimum_margin="0.10"
+    )
+
+    assert baseline.minimum_margin is None
+    assert margin_config.minimum_margin == 0.1
+    assert baseline.config_fingerprint != margin_config.config_fingerprint
+    assert baseline.scoring_fingerprint == margin_config.scoring_fingerprint
+    assert json.loads(margin_config.canonical_json)["minimum_margin"] == 0.1
+
+
+@pytest.mark.parametrize(
+    "minimum_margin", [True, float("nan"), float("inf"), -0.01, 1.01, "invalid"]
+)
+def test_build_tagging_config_rejects_invalid_minimum_margin(
+    model_record: EmbeddingModelRecord, tmp_path: Path, minimum_margin: object
+) -> None:
+    candidates = load_species_candidates(
+        _write_species_file(
+            tmp_path / "species.json",
+            json.dumps(
+                _species_document(
+                    [
+                        {"id": "bird-a", "name": "Bird A"},
+                        {"id": "bird-b", "name": "Bird B"},
+                    ]
+                )
+            ),
+        )
+    )
+
+    with pytest.raises(EmbedValidationError):
+        build_tagging_config(model_record, candidates, minimum_margin=minimum_margin)
+
+
+def test_build_tagging_config_rejects_single_candidate_with_minimum_margin(
+    model_record: EmbeddingModelRecord, tmp_path: Path
+) -> None:
+    candidates = load_species_candidates(
+        _write_species_file(
+            tmp_path / "species.json",
+            json.dumps(_species_document([{"id": "bird", "name": "Bird"}])),
+        )
+    )
+
+    with pytest.raises(EmbedValidationError, match="at least two candidates"):
+        build_tagging_config(model_record, candidates, minimum_margin=0.1)
+
+
 def test_build_tagging_config_fingerprints_minimum_crop_dimensions(
     model_record: EmbeddingModelRecord, tmp_path: Path
 ) -> None:
