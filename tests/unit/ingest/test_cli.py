@@ -128,6 +128,49 @@ def test_ingest_cli_requires_paths() -> None:
     assert result.value.code == 2
 
 
+def test_ingest_cli_parses_context_crop_policy() -> None:
+    arguments = _build_parser().parse_args(
+        [
+            "ingest",
+            "--input",
+            "videos",
+            "--output",
+            "crops",
+            "--crop-context",
+            "0.1",
+            "--crop-policy",
+            "context-v1",
+        ]
+    )
+
+    assert arguments.crop_context == 0.1
+    assert arguments.crop_policy == "context-v1"
+
+
+def test_ingest_cli_rejects_context_with_legacy_crop_policy(
+    tmp_path: Path,
+) -> None:
+    input_root = tmp_path / "input"
+    input_root.mkdir()
+    output_root = tmp_path / "output"
+
+    result = main(
+        [
+            "ingest",
+            "--input",
+            str(input_root),
+            "--output",
+            str(output_root),
+            "--crop-context",
+            "0.1",
+        ],
+        detector=FakeDetector(),
+    )
+
+    assert result == 2
+    assert not output_root.exists()
+
+
 def test_ingest_cli_help_prints_defaults(capsys: pytest.CaptureFixture[str]) -> None:
     with pytest.raises(SystemExit) as result:
         main(["ingest", "--help"])

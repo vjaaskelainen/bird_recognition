@@ -38,6 +38,50 @@ def test_settings_identity_changes_when_effective_settings_change() -> None:
     assert default_fingerprint != changed_fingerprint
 
 
+def test_context_policy_changes_crop_identity_without_overwriting_history(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    input_root = tmp_path / "input"
+    input_root.mkdir()
+    (input_root / "camera.mp4").write_bytes(b"unchanged source")
+    output_root = tmp_path / "output"
+    frame = SampledFrame(0, 0.0, 100, 80, Image.new("RGB", (100, 80), "blue"))
+    monkeypatch.setattr(
+        pipeline, "sample_video", lambda _path, _settings: iter((frame,))
+    )
+    monkeypatch.setattr(
+        pipeline, "capture_start_for_video", lambda _path: CaptureTime()
+    )
+    detections = [Detection(DetectionCategory.ANIMAL, 0.9, (0.1, 0.2, 0.4, 0.8))]
+
+    _, tight_report = run_batch(
+        input_root, output_root, IngestSettings(), FakeDetector(detections)
+    )
+    original_paths = tuple((output_root / "crops").rglob("*.jpg"))
+    original_bytes = tuple(path.read_bytes() for path in original_paths)
+    _, context_report = run_batch(
+        input_root,
+        output_root,
+        IngestSettings(crop_policy="context-v1"),
+        FakeDetector(detections),
+    )
+
+    assert tight_report["status"] == context_report["status"] == "complete"
+    with closing(sqlite3.connect(output_root / "manifest.sqlite3")) as connection:
+        rows = connection.execute(
+            "SELECT settings_fingerprint,image_path,box_left,box_top,"
+            "box_right,box_bottom "
+            "FROM animal_crop ORDER BY settings_fingerprint"
+        ).fetchall()
+    assert len(rows) == 2
+    assert rows[0][0] != rows[1][0]
+    assert rows[0][1] != rows[1][1]
+    assert (rows[0][4] - rows[0][2], rows[0][5] - rows[0][3]) == (30, 48)
+    assert (rows[1][4] - rows[1][2], rows[1][5] - rows[1][3]) == (37, 58)
+    assert tuple(path.read_bytes() for path in original_paths) == original_bytes
+    assert len(list((output_root / "crops").rglob("*.jpg"))) == 2
+
+
 def test_settings_identity_changes_when_model_provenance_changes() -> None:
     baseline = IngestSettings(
         model_variant="MDV6-mit-yolov9-c",

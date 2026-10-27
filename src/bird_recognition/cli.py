@@ -269,6 +269,19 @@ def _build_parser() -> argparse.ArgumentParser:
         metavar="VALUE",
     )
     ingest_parser.add_argument(
+        "--crop-context",
+        type=float,
+        default=None,
+        metavar="FRACTION",
+        help="proportional context expansion per side, clipped to frame bounds",
+    )
+    ingest_parser.add_argument(
+        "--crop-policy",
+        choices=("legacy-tight-v1", "context-v1"),
+        default="legacy-tight-v1",
+        help="versioned crop geometry policy",
+    )
+    ingest_parser.add_argument(
         "--model",
         type=Path,
         default=environment.get("BIRD_RECOGNITION_MEGADETECTOR_MODEL") or None,
@@ -330,6 +343,13 @@ def _build_parser() -> argparse.ArgumentParser:
         "--model-dir",
     )
     index_parser.add_argument("--threshold")
+    index_parser.add_argument(
+        "--input-view",
+        choices=("fit-pad-v1", "legacy-center-crop-v1"),
+        default="fit-pad-v1",
+    )
+    index_parser.add_argument("--minimum-crop-width", type=int, default=32)
+    index_parser.add_argument("--minimum-crop-height", type=int, default=32)
     index_parser.add_argument(
         "--database-url",
         help="local PostgreSQL connection URL",
@@ -438,6 +458,8 @@ def main(argv: list[str] | None = None, detector: Detector | None = None) -> int
             interval=arguments.interval,
             animal_threshold=arguments.animal_threshold,
             person_threshold=arguments.person_threshold,
+            crop_context=arguments.crop_context,
+            crop_policy=arguments.crop_policy,
             extensions=extensions,
             model_path=Path(arguments.model).expanduser() if arguments.model else None,
             model_config_path=(
@@ -661,6 +683,9 @@ def _dispatch_embed_command(arguments: argparse.Namespace) -> int:
                 model_directory=Path(resolved["model_dir"]),
                 threshold=resolved["threshold"],
                 store=store,
+                input_view=arguments.input_view,
+                minimum_crop_width=arguments.minimum_crop_width,
+                minimum_crop_height=arguments.minimum_crop_height,
             )
             payload = {
                 "schema_version": 1,
@@ -676,6 +701,9 @@ def _dispatch_embed_command(arguments: argparse.Namespace) -> int:
                 ),
                 "prompt_version": getattr(run, "prompt_version", "species-photo-v1"),
                 "threshold": run.threshold,
+                "minimum_crop_width": arguments.minimum_crop_width,
+                "minimum_crop_height": arguments.minimum_crop_height,
+                "input_view": arguments.input_view,
                 "counts": {
                     "selected": run.selected_count,
                     "completed": run.completed_count,

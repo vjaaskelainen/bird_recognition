@@ -36,7 +36,7 @@ class ScoreResult:
 
     assigned_species_id: str | None
     best_candidate_id: str | None
-    confidence: float
+    confidence: float | None
     tied_candidate_ids: tuple[str, ...]
     scores: tuple[CandidateScore, ...]
     reason: str
@@ -198,6 +198,18 @@ def validate_decision(
     """Validate decision fields and all persisted scores against candidates."""
     candidate_ids = tuple(sorted(candidate.id for candidate in candidates))
     scores = decision.candidate_scores
+    if decision.reason == "low_quality":
+        if (
+            decision.assigned_species_id is not None
+            or decision.best_candidate_id is not None
+            or decision.tied_candidate_ids
+            or decision.confidence is not None
+            or scores
+        ):
+            raise EmbedValidationError(
+                "low-quality decisions must be unassigned and scoreless"
+            )
+        return
     if tuple(score.id for score in scores) != candidate_ids:
         raise EmbedValidationError(
             "decision scores must contain every candidate in ID order"
@@ -213,7 +225,11 @@ def validate_decision(
     maximum = max(score.logit for score in scores)
     tied = tuple(score.id for score in scores if score.logit == maximum)
     confidence = max(values)
-    if not math.isfinite(decision.confidence) or not 0 <= decision.confidence <= 1:
+    if (
+        decision.confidence is None
+        or not math.isfinite(decision.confidence)
+        or not 0 <= decision.confidence <= 1
+    ):
         raise EmbedValidationError(
             "decision confidence must be finite and within [0, 1]"
         )

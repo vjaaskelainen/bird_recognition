@@ -107,6 +107,30 @@ def test_cli_parser_exposes_story_one_commands_and_exact_selection_options() -> 
     assert usage_error.value.code == 2
 
 
+def test_cli_index_accepts_versioned_input_view_and_quality_dimensions() -> None:
+    arguments = _build_parser().parse_args(
+        [
+            "index",
+            "--manifest",
+            "manifest.sqlite3",
+            "--species-list",
+            "species.json",
+            "--model-dir",
+            "models",
+            "--input-view",
+            "fit-pad-v1",
+            "--minimum-crop-width",
+            "48",
+            "--minimum-crop-height",
+            "40",
+        ]
+    )
+
+    assert arguments.input_view == "fit-pad-v1"
+    assert arguments.minimum_crop_width == 48
+    assert arguments.minimum_crop_height == 40
+
+
 def test_cli_existing_help_does_not_import_bioclip() -> None:
     sys.modules.pop("bird_recognition.embed.bioclip", None)
 

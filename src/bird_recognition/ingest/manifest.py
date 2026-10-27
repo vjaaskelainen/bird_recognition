@@ -205,6 +205,8 @@ def settings_identity(settings: IngestSettings) -> tuple[str, str]:
         "interval": settings.interval,
         "animal_threshold": settings.animal_threshold,
         "person_threshold": settings.person_threshold,
+        "crop_context": settings.crop_context,
+        "crop_policy": settings.crop_policy,
         "extensions": list(settings.extensions),
         "model_path": str(settings.model_path) if settings.model_path else None,
         "model_config_path": (
@@ -525,7 +527,10 @@ class Manifest:
             ):
                 raise StorageError("crop must refer to a qualifying animal detection")
             expected_box = normalized_box_to_pixels(
-                detection.box, frame.width, frame.height
+                detection.box,
+                frame.width,
+                frame.height,
+                context=settings.crop_context or 0.0,
             )
             saved_box = (
                 crop["box_left"],

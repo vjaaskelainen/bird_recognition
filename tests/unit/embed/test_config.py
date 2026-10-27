@@ -526,6 +526,28 @@ def test_build_tagging_config_keeps_scoring_identity_threshold_independent(
     assert json.loads(retagged.canonical_json)["threshold"] == 0.75
 
 
+def test_build_tagging_config_fingerprints_minimum_crop_dimensions(
+    model_record: EmbeddingModelRecord, tmp_path: Path
+) -> None:
+    species_path = _write_species_file(
+        tmp_path / "species.json",
+        json.dumps(_species_document([{"id": "bird", "name": "Bird"}])),
+    )
+    candidates = load_species_candidates(species_path)
+
+    baseline = build_tagging_config(model_record, candidates)
+    stricter_quality = build_tagging_config(
+        model_record, candidates, minimum_crop_width=40, minimum_crop_height=48
+    )
+
+    assert baseline.config_fingerprint != stricter_quality.config_fingerprint
+    assert baseline.scoring_fingerprint == stricter_quality.scoring_fingerprint
+    assert json.loads(stricter_quality.canonical_json)["minimum_crop_width"] == 40
+    assert json.loads(stricter_quality.canonical_json)["minimum_crop_height"] == 48
+    with pytest.raises(EmbedValidationError):
+        build_tagging_config(model_record, candidates, minimum_crop_width=0)
+
+
 def test_resolve_embed_configuration_uses_cli_environment_dotenv_then_default() -> None:
     resolved = resolve_embed_configuration(
         "index",

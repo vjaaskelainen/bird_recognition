@@ -52,6 +52,8 @@ class IngestSettings:
     interval: float = 1.0
     animal_threshold: float = 0.2
     person_threshold: float = 0.2
+    crop_context: float | None = None
+    crop_policy: str = "legacy-tight-v1"
     extensions: tuple[str, ...] = (
         ".mp4",
         ".mov",
@@ -93,6 +95,21 @@ class IngestSettings:
         if not normalized or any(extension == "." for extension in normalized):
             raise ValidationError("at least one valid video extension is required")
         object.__setattr__(self, "extensions", tuple(sorted(set(normalized))))
+        if self.crop_policy not in {"legacy-tight-v1", "context-v1"}:
+            raise ValidationError("unsupported crop policy version")
+        context = self.crop_context
+        if context is None:
+            context = 0.1 if self.crop_policy == "context-v1" else 0.0
+        if (
+            isinstance(context, bool)
+            or not isinstance(context, (int, float))
+            or not math.isfinite(context)
+            or context < 0
+        ):
+            raise ValidationError("crop context must be finite and non-negative")
+        if self.crop_policy == "legacy-tight-v1" and context != 0:
+            raise ValidationError("legacy-tight-v1 requires zero crop context")
+        object.__setattr__(self, "crop_context", context)
 
 
 @dataclass(frozen=True, slots=True)

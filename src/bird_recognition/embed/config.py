@@ -76,9 +76,13 @@ def build_tagging_config(
     model: EmbeddingModelRecord,
     candidate_set: SpeciesCandidateSet,
     threshold: object = None,
+    *,
+    minimum_crop_width: int = 32,
+    minimum_crop_height: int = 32,
 ) -> TaggingConfig:
     """Build canonical model, candidate, scoring, and decision identities."""
     validated_threshold = validate_threshold(threshold)
+    validate_minimum_crop_dimensions(minimum_crop_width, minimum_crop_height)
     prompt_template, prompt_version = _prompt_identity(candidate_set.schema_version)
     scoring = {
         "schema_version": 1,
@@ -107,6 +111,8 @@ def build_tagging_config(
         "scoring_fingerprint": scoring_fingerprint,
         "scoring": scoring,
         "threshold": validated_threshold,
+        "minimum_crop_width": minimum_crop_width,
+        "minimum_crop_height": minimum_crop_height,
     }
     canonical_json = canonical_json_bytes(canonical).decode("utf-8")
     return TaggingConfig(
@@ -120,7 +126,16 @@ def build_tagging_config(
         scoring_json=scoring_json,
         threshold=validated_threshold,
         canonical_json=canonical_json,
+        minimum_crop_width=minimum_crop_width,
+        minimum_crop_height=minimum_crop_height,
     )
+
+
+def validate_minimum_crop_dimensions(width: object, height: object) -> tuple[int, int]:
+    """Validate the positive pixel dimensions used by crop-quality gates."""
+    if type(width) is not int or type(height) is not int or width <= 0 or height <= 0:
+        raise EmbedValidationError("minimum crop dimensions must be positive integers")
+    return width, height
 
 
 def _reject_duplicate_json_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:

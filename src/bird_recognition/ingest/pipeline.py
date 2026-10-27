@@ -102,7 +102,11 @@ def process_sampled_frame(
         )
         crops: list[object] = []
         for detection in qualifying:
-            crop, _ = crop_image(frame.image, detection.box)  # type: ignore[arg-type]
+            crop, _ = crop_image(
+                frame.image,
+                detection.box,  # type: ignore[arg-type]
+                context=settings.crop_context or 0.0,
+            )
             crops.append(crop)
         return replace(result, crops=tuple(crops))
     except Exception as error:
@@ -188,7 +192,11 @@ def _publish_result(
             paths = publish_frame_crops(entries, crop_directory)
             published_directory = crop_directory
             for detection, path in zip(detections, paths, strict=True):
-                _, box = crop_image(frame.image, detection.box)
+                _, box = crop_image(
+                    frame.image,
+                    detection.box,
+                    context=settings.crop_context or 0.0,
+                )
                 crop_records.append(
                     {
                         "crop_id": stable_crop_id(

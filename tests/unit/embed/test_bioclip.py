@@ -7,6 +7,7 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
+from PIL import Image
 
 from bird_recognition.embed.models import EmbedValidationError, SharedModelError
 
@@ -172,6 +173,11 @@ def test_load_bioclip_strictly_loads_local_checkpoint_on_cpu(
     assert adapter.identity.dimension == 512
     assert adapter.identity.upstream_revision == "a" * 40
     assert adapter.identity.logit_scale == pytest.approx(2.0)
+    assert '"version":"fit-pad-v1"' in adapter.identity.preprocessing_json
+    legacy_adapter = bioclip.load_bioclip(root, input_view="legacy-center-crop-v1")
+    assert (
+        adapter.identity.model_fingerprint != legacy_adapter.identity.model_fingerprint
+    )
 
 
 def test_create_model_loads_local_checkpoint_without_hub_loading(
@@ -254,6 +260,8 @@ def test_bioclip_preprocesses_local_images_and_returns_cpu_float32_vectors(
     )
     model._model = _ControlledModel()
     model._preprocess = lambda image: torch.zeros((3, 224, 224), dtype=torch.float32)
+    model._input_view = "legacy-center-crop-v1"
+    model._padding_mean = (0.48145466, 0.4578275, 0.40821073)
     model._tokenizer = lambda prompts: torch.zeros(
         (len(prompts), 77), dtype=torch.int64
     )
@@ -269,6 +277,32 @@ def test_bioclip_preprocesses_local_images_and_returns_cpu_float32_vectors(
     assert len(text_result) == 1
     assert len(text_result[0]) == 512
     assert sum(value * value for value in text_result[0]) == pytest.approx(1.0)
+
+
+def test_prepare_image_view_fits_full_elongated_image_without_distortion() -> None:
+    from bird_recognition.embed.bioclip import prepare_image_view
+
+    image = Image.new("RGB", (200, 50), (255, 0, 0))
+
+    prepared = prepare_image_view(image, "fit-pad-v1")
+
+    assert prepared.size == (224, 224)
+    assert prepared.getpixel((112, 90)) == (255, 0, 0)
+    assert prepared.getpixel((112, 112)) == (255, 0, 0)
+    assert prepared.getpixel((112, 0)) != (255, 0, 0)
+    assert image.size == (200, 50)
+
+
+def test_input_view_version_changes_preprocessing_identity() -> None:
+    from bird_recognition.embed.bioclip import _preprocessing_contract
+    from bird_recognition.embed.config import canonical_json_sha256
+
+    config = {"preprocess_cfg": {}}
+    fit_pad = _preprocessing_contract(config, "fit-pad-v1")
+    legacy = _preprocessing_contract(config, "legacy-center-crop-v1")
+
+    assert canonical_json_sha256(fit_pad) != canonical_json_sha256(legacy)
+    assert fit_pad["input_view"]["fit"] == "full-image-no-distortion"
 
 
 class _ControlledModel:

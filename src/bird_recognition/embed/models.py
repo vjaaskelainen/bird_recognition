@@ -330,6 +330,8 @@ class TaggingConfig:
     scoring_json: str
     threshold: float
     canonical_json: str
+    minimum_crop_width: int = 32
+    minimum_crop_height: int = 32
 
     def __post_init__(self) -> None:
         for name in (
@@ -348,6 +350,15 @@ class TaggingConfig:
             )
         if not math.isfinite(self.threshold) or not 0 <= self.threshold <= 1:
             raise EmbedValidationError("threshold must be finite and within [0, 1]")
+        if (
+            type(self.minimum_crop_width) is not int
+            or type(self.minimum_crop_height) is not int
+            or self.minimum_crop_width <= 0
+            or self.minimum_crop_height <= 0
+        ):
+            raise EmbedValidationError(
+                "minimum crop dimensions must be positive integers"
+            )
 
 
 @dataclass(frozen=True, slots=True)
@@ -384,7 +395,7 @@ class SpeciesDecision:
     config_fingerprint: Sha256
     assigned_species_id: str | None
     best_candidate_id: str | None
-    confidence: float
+    confidence: float | None
     tied_candidate_ids: tuple[str, ...]
     candidate_scores: tuple[CandidateScore, ...]
     reason: str

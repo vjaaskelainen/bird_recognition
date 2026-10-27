@@ -47,9 +47,9 @@ def _snapshot(crop_id: str, path: Path) -> IngestedCropSnapshot:
         detection_category="animal",
         detection_confidence=0.9,
         detection_box_normalized=(0.1, 0.1, 0.9, 0.9),
-        crop_box_pixels=(0, 0, 32, 24),
+        crop_box_pixels=(0, 0, 32, 32),
         frame_width=32,
-        frame_height=24,
+        frame_height=32,
         crop_original_image_path=path.name,
         capture_time=None,
         capture_timezone=None,
@@ -98,7 +98,7 @@ def test_threshold_only_retag_reuses_persisted_score_map_without_inference(
     root = tmp_path / "crops"
     root.mkdir()
     image_path = root / "crop.png"
-    Image.new("RGB", (32, 24), (40, 120, 210)).save(image_path)
+    Image.new("RGB", (32, 32), (40, 120, 210)).save(image_path)
     snapshot = _snapshot("crop-1", image_path)
     candidates = [
         {"id": "bird-a", "name": "Bird A"},
@@ -140,7 +140,7 @@ def test_changed_candidates_reuse_only_image_vector_and_keep_history(
     root = tmp_path / "crops"
     root.mkdir()
     image_path = root / "crop.png"
-    Image.new("RGB", (32, 24), (40, 120, 210)).save(image_path)
+    Image.new("RGB", (32, 32), (40, 120, 210)).save(image_path)
     snapshot = _snapshot("crop-1", image_path)
     state = FakeStoreState()
     first = _index(
@@ -187,7 +187,7 @@ def test_changed_model_requires_new_image_representation(
     root = tmp_path / "crops"
     root.mkdir()
     image_path = root / "crop.png"
-    Image.new("RGB", (32, 24), (40, 120, 210)).save(image_path)
+    Image.new("RGB", (32, 32), (40, 120, 210)).save(image_path)
     snapshot = _snapshot("crop-1", image_path)
     candidates = [{"id": "bird", "name": "Bird"}]
     state = FakeStoreState()
@@ -213,7 +213,7 @@ def test_candidate_reorder_and_crop_relocation_keep_semantic_identity(
     original_root = tmp_path / "original"
     original_root.mkdir()
     original_path = original_root / "crop.png"
-    Image.new("RGB", (32, 24), (40, 120, 210)).save(original_path)
+    Image.new("RGB", (32, 32), (40, 120, 210)).save(original_path)
     snapshot = _snapshot("crop-1", original_path)
     candidates = [
         {"id": "bird-a", "name": "Bird A"},
@@ -247,7 +247,7 @@ def test_changed_provenance_invalidates_vector_and_decision_reuse(
     root = tmp_path / "crops"
     root.mkdir()
     image_path = root / "crop.png"
-    Image.new("RGB", (32, 24), (40, 120, 210)).save(image_path)
+    Image.new("RGB", (32, 32), (40, 120, 210)).save(image_path)
     snapshot = _snapshot("crop-1", image_path)
     candidates = [{"id": "bird", "name": "Bird"}]
     state = FakeStoreState()
@@ -276,7 +276,7 @@ def test_unchanged_retry_skips_all_completed_crops_without_inference(
     snapshots = []
     for index in range(100):
         image_path = root / f"crop-{index:03}.png"
-        Image.new("RGB", (32, 24), (40, 120, 210)).save(image_path)
+        Image.new("RGB", (32, 32), (40, 120, 210)).save(image_path)
         snapshots.append(_snapshot(f"crop-{index:03}", image_path))
     candidates = load_species_candidates(
         _candidate_file(tmp_path / "species.json", [{"id": "bird", "name": "Bird"}])
@@ -315,7 +315,7 @@ def test_newly_unreadable_completed_crop_fails_instead_of_skipping(
     root = tmp_path / "crops"
     root.mkdir()
     image_path = root / "crop.png"
-    Image.new("RGB", (32, 24), (40, 120, 210)).save(image_path)
+    Image.new("RGB", (32, 32), (40, 120, 210)).save(image_path)
     snapshot = _snapshot("crop-1", image_path)
     candidates = [{"id": "bird", "name": "Bird"}]
     state = FakeStoreState()
@@ -340,7 +340,7 @@ def test_interrupted_run_recovers_stale_status_and_retries_pending_items(
     snapshots = []
     for index in range(3):
         image_path = root / f"crop-{index}.png"
-        Image.new("RGB", (32, 24), (40, 120, 210)).save(image_path)
+        Image.new("RGB", (32, 32), (40, 120, 210)).save(image_path)
         snapshots.append(_snapshot(f"crop-{index}", image_path))
     candidates = load_species_candidates(
         _candidate_file(tmp_path / "species.json", [{"id": "bird", "name": "Bird"}])
@@ -393,7 +393,7 @@ def test_lost_commit_acknowledgement_is_not_counted_and_retry_reconciles(
     root = tmp_path / "crops"
     root.mkdir()
     image_path = root / "crop.png"
-    Image.new("RGB", (32, 24), (40, 120, 210)).save(image_path)
+    Image.new("RGB", (32, 32), (40, 120, 210)).save(image_path)
     snapshot = _snapshot("crop-1", image_path)
     candidates = [{"id": "bird", "name": "Bird"}]
     state = FakeStoreState()
@@ -428,7 +428,7 @@ def test_shared_model_failure_stops_batch_and_leaves_pending_remainder(
     snapshots = []
     for index in range(3):
         image_path = root / f"crop-{index}.png"
-        Image.new("RGB", (32, 24), (40, 120, 210)).save(image_path)
+        Image.new("RGB", (32, 32), (40, 120, 210)).save(image_path)
         snapshots.append(_snapshot(f"crop-{index}", image_path))
     candidates = load_species_candidates(
         _candidate_file(tmp_path / "species.json", [{"id": "bird", "name": "Bird"}])
@@ -459,7 +459,7 @@ def test_retag_write_rollback_preserves_previously_committed_representation(
     root = tmp_path / "crops"
     root.mkdir()
     image_path = root / "crop.png"
-    Image.new("RGB", (32, 24), (40, 120, 210)).save(image_path)
+    Image.new("RGB", (32, 32), (40, 120, 210)).save(image_path)
     snapshot = _snapshot("crop-1", image_path)
     candidates = [
         {"id": "bird-a", "name": "Bird A"},
@@ -500,7 +500,7 @@ def test_storage_failure_stops_after_confirmed_commits_and_leaves_pending_items(
     snapshots = []
     for index in range(3):
         image_path = root / f"crop-{index}.png"
-        Image.new("RGB", (32, 24), (40, 120, 210)).save(image_path)
+        Image.new("RGB", (32, 32), (40, 120, 210)).save(image_path)
         snapshots.append(_snapshot(f"crop-{index}", image_path))
     candidates = load_species_candidates(
         _candidate_file(tmp_path / "species.json", [{"id": "bird", "name": "Bird"}])

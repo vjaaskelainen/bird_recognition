@@ -23,7 +23,12 @@ from bird_recognition.embed.pipeline import index_crops
 from tests.unit.embed.fakes import FakeModel, FakeStore, FakeStoreState
 
 
-def _snapshot(crop_id: str, path: Path, image_bytes: bytes) -> IngestedCropSnapshot:
+def _snapshot(
+    crop_id: str,
+    path: Path,
+    image_bytes: bytes,
+    size: tuple[int, int] = (40, 40),
+) -> IngestedCropSnapshot:
     digest = hashlib.sha256(image_bytes).hexdigest()
     values = {
         "crop_id": crop_id,
@@ -40,9 +45,9 @@ def _snapshot(crop_id: str, path: Path, image_bytes: bytes) -> IngestedCropSnaps
         "detection_category": "animal",
         "detection_confidence": 0.9,
         "detection_box_normalized": (0.1, 0.1, 0.9, 0.9),
-        "crop_box_pixels": (0, 0, 32, 24),
-        "frame_width": 32,
-        "frame_height": 24,
+        "crop_box_pixels": (0, 0, *size),
+        "frame_width": size[0],
+        "frame_height": size[1],
         "crop_original_image_path": path.name,
         "capture_time": None,
         "capture_timezone": None,
@@ -104,16 +109,20 @@ def _typed_candidate_file(tmp_path: Path) -> Path:
     return path
 
 
-def _new_crops(tmp_path: Path, count: int) -> tuple[list[IngestedCropSnapshot], Path]:
+def _new_crops(
+    tmp_path: Path,
+    count: int,
+    size: tuple[int, int] = (40, 40),
+) -> tuple[list[IngestedCropSnapshot], Path]:
     root = tmp_path / "crops"
     root.mkdir()
     snapshots = []
     for index in range(count):
         crop_id = f"crop-{index:03}"
         path = root / f"{crop_id}.png"
-        Image.new("RGB", (32, 24), (20 + index % 200, 80, 130)).save(path)
+        Image.new("RGB", size, (20 + index % 200, 80, 130)).save(path)
         image_bytes = path.read_bytes()
-        snapshots.append(_snapshot(crop_id, path, image_bytes))
+        snapshots.append(_snapshot(crop_id, path, image_bytes, size))
     return snapshots, root
 
 
@@ -203,6 +212,8 @@ def test_index_crops_persists_100_results_and_restart_inspects_provenance(
     settings = json.loads(run.sanitized_settings_json)
     assert set(settings) == {
         "candidate_set_fingerprint",
+        "minimum_crop_height",
+        "minimum_crop_width",
         "model_fingerprint",
         "threshold",
     }
@@ -406,6 +417,51 @@ def test_index_crops_isolates_invalid_image_vector_and_continues(
     assert run.status is RunStatus.PARTIAL_FAILURE
     assert (run.completed_count, run.failed_count) == (1, 1)
     assert run.failures[0].code == "invalid_vector"
+
+
+def test_index_crops_marks_undersized_crop_low_quality_without_scores(
+    tmp_path: Path, model_record: EmbeddingModelRecord
+) -> None:
+    snapshots, crop_root = _new_crops(tmp_path, 1, size=(20, 40))
+    candidates = load_species_candidates(
+        _candidate_file(tmp_path, [{"id": "bird", "name": "Bird"}])
+    )
+    state = FakeStoreState()
+    first_run = index_crops(
+        snapshots,
+        crop_root=crop_root,
+        manifest_locator=tmp_path / "manifest.sqlite3",
+        candidates=candidates,
+        model=FakeModel(model_record),
+        store=FakeStore(state),
+        minimum_crop_width=10,
+        minimum_crop_height=10,
+    )
+    model = FakeModel(model_record)
+    quality_run = index_crops(
+        snapshots,
+        crop_root=crop_root,
+        manifest_locator=tmp_path / "manifest.sqlite3",
+        candidates=candidates,
+        model=model,
+        store=FakeStore(state),
+    )
+
+    decision = max(state.decisions.values(), key=lambda item: item.processed_at)
+    assert first_run.status is quality_run.status is RunStatus.COMPLETE
+    assert (
+        quality_run.completed_count,
+        quality_run.assigned_count,
+        quality_run.unknown_count,
+    ) == (1, 0, 1)
+    assert next(iter(state.decisions.values())).assigned_species_id is not None
+    assert decision.reason == "low_quality"
+    assert decision.assigned_species_id is None
+    assert decision.best_candidate_id is None
+    assert decision.confidence is None
+    assert decision.candidate_scores == ()
+    assert model.image_calls == 0
+    assert model.text_calls == 0
 
 
 def test_index_crops_reports_lost_commit_acknowledgement_as_unconfirmed(

@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
-from PIL import Image
+from PIL import Image, ImageOps
 
 from bird_recognition.embed.config import canonical_json_bytes, canonical_json_sha256
 from bird_recognition.embed.models import (
@@ -34,6 +34,8 @@ _SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 _REVISION_PATTERN = re.compile(r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$")
 _DEFAULT_MEAN = (0.48145466, 0.4578275, 0.40821073)
 _DEFAULT_STD = (0.26862954, 0.26130258, 0.27577711)
+FIT_PAD_VIEW = "fit-pad-v1"
+LEGACY_CROP_VIEW = "legacy-center-crop-v1"
 
 
 class BioClipModel:
@@ -45,11 +47,15 @@ class BioClipModel:
         preprocess: Any,
         tokenizer: Any,
         identity: EmbeddingModelRecord,
+        input_view: str,
     ) -> None:
         self._model = model
         self._preprocess = preprocess
         self._tokenizer = tokenizer
         self._identity = identity
+        self._input_view = input_view
+        preprocessing = json.loads(identity.preprocessing_json)
+        self._padding_mean = tuple(preprocessing.get("mean", _DEFAULT_MEAN))
 
     @property
     def identity(self) -> EmbeddingModelRecord:
@@ -63,10 +69,14 @@ class BioClipModel:
 
             if isinstance(image, (str, Path)):
                 with Image.open(image) as opened:
-                    rgb_image = opened.convert("RGB")
+                    rgb_image = prepare_image_view(
+                        opened, self._input_view, mean=self._padding_mean
+                    )
                     tensor = self._preprocess(rgb_image)
             elif isinstance(image, Image.Image):
-                tensor = self._preprocess(image.convert("RGB"))
+                tensor = self._preprocess(
+                    prepare_image_view(image, self._input_view, mean=self._padding_mean)
+                )
             else:
                 raise TypeError("image input must be a PIL image or path")
             batch = tensor.to(device="cpu", dtype=torch.float32).unsqueeze(0)
@@ -103,9 +113,11 @@ class BioClipModel:
             raise SharedModelError("BioCLIP text inference failed") from error
 
 
-def load_bioclip(model_directory: Path) -> BioClipModel:
+def load_bioclip(model_directory: Path, input_view: str = FIT_PAD_VIEW) -> BioClipModel:
     """Validate and strictly load a complete local BioCLIP asset bundle."""
     root = Path(model_directory).expanduser()
+    if input_view not in {FIT_PAD_VIEW, LEGACY_CROP_VIEW}:
+        raise EmbedValidationError("unsupported model input-view version")
     if not root.is_dir():
         raise EmbedValidationError("BioCLIP asset directory is unavailable")
     manifest = _read_asset_manifest(root / ASSET_MANIFEST_NAME)
@@ -146,7 +158,7 @@ def load_bioclip(model_directory: Path) -> BioClipModel:
         "checkpoint_sha256": manifest["files"][ASSET_CHECKPOINT_NAME],
         "config_sha256": manifest["files"][ASSET_CONFIG_NAME],
         "tokenizer_sha256": tokenizer_sha256,
-        "preprocessing": _preprocessing_contract(config),
+        "preprocessing": _preprocessing_contract(config, input_view),
         "adapter_version": "bioclip-local-cpu-v1",
         "runtime": {
             "open_clip_torch": importlib.metadata.version("open-clip-torch"),
@@ -189,7 +201,7 @@ def load_bioclip(model_directory: Path) -> BioClipModel:
         logit_scale=effective_logit_scale,
         canonical_json=canonical_json,
     )
-    return BioClipModel(model, preprocess, tokenizer, record)
+    return BioClipModel(model, preprocess, tokenizer, record, input_view)
 
 
 def _read_asset_manifest(path: Path) -> dict[str, Any]:
@@ -327,7 +339,7 @@ def _build_preprocess(image_transform: Any, config: dict[str, Any]) -> Any:
     )
 
 
-def _preprocessing_contract(config: dict[str, Any]) -> dict[str, Any]:
+def _preprocessing_contract(config: dict[str, Any], input_view: str) -> dict[str, Any]:
     preprocess_cfg = config.get("preprocess_cfg", {})
     return {
         "image_size": IMAGE_SIZE,
@@ -336,7 +348,42 @@ def _preprocessing_contract(config: dict[str, Any]) -> dict[str, Any]:
         "color": "RGB",
         "transform": "open_clip_eval_v1",
         "dtype": "float32",
+        "input_view": {
+            "version": input_view,
+            "fit": "full-image-no-distortion"
+            if input_view == FIT_PAD_VIEW
+            else "open-clip-center-crop",
+            "padding": "neutral-model-mean" if input_view == FIT_PAD_VIEW else None,
+        },
     }
+
+
+def prepare_image_view(
+    image: Image.Image,
+    version: str,
+    *,
+    mean: tuple[float, float, float] = _DEFAULT_MEAN,
+) -> Image.Image:
+    """Fit the complete crop into a neutral-padded square without distortion."""
+    if version == LEGACY_CROP_VIEW:
+        return image.convert("RGB").copy()
+    if version != FIT_PAD_VIEW:
+        raise EmbedValidationError("unsupported model input-view version")
+    rgb_image = image.convert("RGB")
+    width, height = rgb_image.size
+    if width <= 0 or height <= 0:
+        raise EmbedValidationError("crop dimensions must be positive")
+    scale = min(IMAGE_SIZE / width, IMAGE_SIZE / height)
+    resized_size = (max(1, round(width * scale)), max(1, round(height * scale)))
+    resized = rgb_image.resize(resized_size, Image.Resampling.LANCZOS)
+    padding = (
+        (IMAGE_SIZE - resized_size[0]) // 2,
+        (IMAGE_SIZE - resized_size[1]) // 2,
+        IMAGE_SIZE - resized_size[0] - (IMAGE_SIZE - resized_size[0]) // 2,
+        IMAGE_SIZE - resized_size[1] - (IMAGE_SIZE - resized_size[1]) // 2,
+    )
+    fill = tuple(round(channel * 255) for channel in mean)
+    return ImageOps.expand(resized, border=padding, fill=fill)
 
 
 def _validated_output(output: Any, expected_rows: int) -> Vector:

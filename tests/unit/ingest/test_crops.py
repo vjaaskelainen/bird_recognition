@@ -48,3 +48,21 @@ def test_crop_image_matches_pixel_box(
 
     assert box == (8, 6, 24, 18)
     assert crop.size == (16, 12)
+
+
+def test_crop_image_expands_context_and_clips_at_frame_edges() -> None:
+    image = Image.new("RGB", (100, 80), "white")
+
+    crop, box = crop_image(image, (0.0, 0.25, 0.2, 0.75), context=0.1)
+
+    assert box == (0, 16, 23, 64)
+    assert crop.size == (23, 48)
+
+
+def test_crop_image_context_preserves_elongated_rectangle() -> None:
+    image = Image.new("RGB", (200, 80), "white")
+
+    crop, box = crop_image(image, (0.1, 0.4, 0.9, 0.6), context=0.1)
+
+    assert box == (3, 30, 196, 50)
+    assert crop.size == (193, 20)

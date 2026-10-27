@@ -16,6 +16,7 @@ from bird_recognition.embed.config import (
     canonical_json_sha256,
     format_candidate_prompt,
     load_species_candidates,
+    validate_minimum_crop_dimensions,
     validate_threshold,
 )
 from bird_recognition.embed.manifest import read_manifest_snapshot, resolve_crop_path
@@ -41,6 +42,7 @@ from bird_recognition.embed.models import (
     UnconfirmedCommitError,
 )
 from bird_recognition.embed.scoring import (
+    ScoreResult,
     decision_from_score_map,
     score_embeddings,
     validate_normalized_vector,
@@ -64,6 +66,9 @@ def index_manifest(
     model_directory: Path,
     threshold: object,
     store: StoreProtocol,
+    input_view: str = "fit-pad-v1",
+    minimum_crop_width: int = 32,
+    minimum_crop_height: int = 32,
 ) -> ProcessingRun:
     """Validate all inputs and run indexing against the read-only manifest snapshot."""
     from bird_recognition.embed.bioclip import load_bioclip
@@ -82,8 +87,17 @@ def index_manifest(
     snapshots = read_manifest_snapshot(manifest, effective_crop_root)
     candidates = load_species_candidates(Path(species_path).expanduser())
     validated_threshold = validate_threshold(threshold)
-    model = load_bioclip(Path(model_directory).expanduser())
-    config = build_tagging_config(model.identity, candidates, validated_threshold)
+    minimum_crop_width, minimum_crop_height = validate_minimum_crop_dimensions(
+        minimum_crop_width, minimum_crop_height
+    )
+    model = load_bioclip(Path(model_directory).expanduser(), input_view=input_view)
+    config = build_tagging_config(
+        model.identity,
+        candidates,
+        validated_threshold,
+        minimum_crop_width=minimum_crop_width,
+        minimum_crop_height=minimum_crop_height,
+    )
     return index_crops(
         snapshots,
         crop_root=effective_crop_root,
@@ -106,12 +120,18 @@ def index_crops(
     store: StoreProtocol,
     threshold: object = 0.5,
     config: TaggingConfig | None = None,
+    minimum_crop_width: int = 32,
+    minimum_crop_height: int = 32,
 ) -> ProcessingRun:
     """Index a stable snapshot list with atomic per-crop commits."""
     validated_threshold = validate_threshold(threshold)
     identity = model.identity
     tagging_config = config or build_tagging_config(
-        identity, candidates, validated_threshold
+        identity,
+        candidates,
+        validated_threshold,
+        minimum_crop_width=minimum_crop_width,
+        minimum_crop_height=minimum_crop_height,
     )
     if tagging_config.model_fingerprint != identity.model_fingerprint:
         raise EmbedValidationError("tagging config does not match the loaded model")
@@ -189,6 +209,8 @@ def _run_index(
         sanitized_settings_json=json.dumps(
             {
                 "threshold": config.threshold,
+                "minimum_crop_width": config.minimum_crop_width,
+                "minimum_crop_height": config.minimum_crop_height,
                 "model_fingerprint": model_identity.model_fingerprint,
                 "candidate_set_fingerprint": candidates.candidate_set_fingerprint,
             },
@@ -298,13 +320,33 @@ def _run_index(
             ):
                 raise StorageError("stored representation identity is incompatible")
 
+            try:
+                with Image.open(crop_path) as image:
+                    image.verify()
+                with Image.open(crop_path) as image:
+                    crop_width, crop_height = image.size
+            except UnidentifiedImageError, OSError:
+                failure = RunFailure(
+                    snapshot.crop_id,
+                    "crop_decode_error",
+                    _FAILURE_MESSAGES["crop_decode_error"],
+                )
+                store.mark_item_failed(_failed_item(pending_item, failure))
+                failures.append(failure)
+                failed += 1
+                continue
+            low_quality = (
+                crop_width < config.minimum_crop_width
+                or crop_height < config.minimum_crop_height
+            )
+
             image_vector: tuple[float, ...] = ()
             compatible_score_map = (
                 store.get_compatible_score_map(
                     compatible_representation.representation_id,
                     config.scoring_fingerprint,
                 )
-                if compatible_representation is not None
+                if compatible_representation is not None and not low_quality
                 else None
             )
             try:
@@ -318,7 +360,7 @@ def _run_index(
                         threshold=config.threshold,
                     )
                 else:
-                    if text_vectors is None:
+                    if not low_quality and text_vectors is None:
                         prompts = tuple(
                             format_candidate_prompt(item, config.prompt_template)
                             for item in candidates.candidates
@@ -343,18 +385,30 @@ def _run_index(
                         )
                     else:
                         with Image.open(crop_path) as image:
-                            image.verify()
-                        with Image.open(crop_path) as image:
                             image.load()
                             image_vector = model.encode_image(image.convert("RGB"))
                         image_vector = validate_normalized_vector(image_vector)
-                    result = score_embeddings(
-                        image_vector,
-                        text_vectors,
-                        candidates.candidates,
-                        logit_scale=config.effective_logit_scale,
-                        threshold=config.threshold,
-                    )
+                    if low_quality:
+                        result = ScoreResult(
+                            assigned_species_id=None,
+                            best_candidate_id=None,
+                            confidence=None,
+                            tied_candidate_ids=(),
+                            scores=(),
+                            reason="low_quality",
+                            warnings=(
+                                "Crop is below the configured minimum dimensions; "
+                                "candidate scores were not computed.",
+                            ),
+                        )
+                    else:
+                        result = score_embeddings(
+                            image_vector,
+                            text_vectors,
+                            candidates.candidates,
+                            logit_scale=config.effective_logit_scale,
+                            threshold=config.threshold,
+                        )
             except UnidentifiedImageError, OSError:
                 failure = RunFailure(
                     snapshot.crop_id,
