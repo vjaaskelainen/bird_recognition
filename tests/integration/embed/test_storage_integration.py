@@ -203,7 +203,7 @@ def test_database_init_is_transactional_and_idempotent(
     first = initialize_database(disposable_embed_schema)
     second = initialize_database(disposable_embed_schema)
 
-    assert first.schema_version == 2
+    assert first.schema_version == 3
     assert first.vector_available
     assert first.changes_applied
     assert not second.changes_applied
@@ -277,8 +277,8 @@ def test_species_candidate_migration_preserves_legacy_candidate_rows(
             ("a" * 64,),
         ).fetchone()
 
-    assert result.version == 2
-    assert result.applied_versions == (2,)
+    assert result.version == 3
+    assert result.applied_versions == (2, 3)
     assert row == (
         1,
         [{"id": "raven", "name": "Common raven"}],

@@ -350,6 +350,14 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     index_parser.add_argument("--minimum-crop-width", type=int, default=32)
     index_parser.add_argument("--minimum-crop-height", type=int, default=32)
+    index_parser.add_argument("--reference-set", type=Path)
+    index_parser.add_argument(
+        "--reference-split-mode",
+        choices=("source_video", "recording_day"),
+        default="source_video",
+    )
+    index_parser.add_argument("--reference-min-similarity", type=float)
+    index_parser.add_argument("--reference-min-agreement", type=float)
     index_parser.add_argument(
         "--database-url",
         help="local PostgreSQL connection URL",
@@ -384,6 +392,20 @@ def _build_parser() -> argparse.ArgumentParser:
     comparison_parser.add_argument("--output", required=True, type=Path)
     comparison_parser.add_argument("--database-url")
     comparison_parser.add_argument("--json", action="store_true")
+    benchmark_parser = commands.add_parser(
+        "benchmark-species", help="benchmark a selected local model on a capped cohort"
+    )
+    benchmark_parser.add_argument("--run-id", required=True)
+    benchmark_parser.add_argument("--labels", required=True, type=Path)
+    benchmark_parser.add_argument("--output", required=True, type=Path)
+    benchmark_parser.add_argument("--max-crops", required=True, type=int)
+    benchmark_parser.add_argument("--model-adapter", default="bioclip")
+    benchmark_parser.add_argument("--model-dir", required=True, type=Path)
+    benchmark_parser.add_argument(
+        "--input-view", choices=("fit-pad-v1", "legacy-center-crop-v1")
+    )
+    benchmark_parser.add_argument("--database-url")
+    benchmark_parser.add_argument("--json", action="store_true")
     return parser
 
 
@@ -433,6 +455,7 @@ def main(argv: list[str] | None = None, detector: Detector | None = None) -> int
         "inspect",
         "evaluate-species",
         "compare-species",
+        "benchmark-species",
     }:
         if arguments.command == "compare-species" and len(arguments.run_id) < 2:
             parser.error("compare-species requires at least two --run-id values")
@@ -640,6 +663,62 @@ def _dispatch_embed_command(arguments: argparse.Namespace) -> int:
                 "report": report,
             }
             run = None
+        elif arguments.command == "benchmark-species":
+            from bird_recognition.embed.evaluation import (
+                build_benchmark_report,
+                load_label_file,
+                validate_report_destination,
+                write_evaluation_report,
+            )
+
+            if not 1 <= arguments.max_crops <= 500:
+                raise EmbedValidationError(
+                    "max crops must be a positive integer no greater than 500"
+                )
+            if arguments.model_adapter != "bioclip":
+                raise EmbedValidationError(
+                    "selected local model adapter is unsupported"
+                )
+            run_id = UUID(arguments.run_id)
+            load_label_file(arguments.labels)
+            output_path = validate_report_destination(arguments.output)
+            with closing(PgVectorStore(arguments.database_url)) as store:
+                try:
+                    store.preflight(read_only=True)
+                except StorageError as error:
+                    raise PreflightError(str(error)) from None
+                run_data, items = store.inspect_run(run_id)
+                model_data = run_data.get("model")
+                preprocessing = (
+                    model_data.get("preprocessing", {})
+                    if isinstance(model_data, dict)
+                    else {}
+                )
+                saved_view = (
+                    preprocessing.get("input_view", {}).get("version")
+                    if isinstance(preprocessing, dict)
+                    and isinstance(preprocessing.get("input_view"), dict)
+                    else "fit-pad-v1"
+                )
+                input_view = arguments.input_view or saved_view
+                from bird_recognition.embed.bioclip import load_bioclip
+
+                model = load_bioclip(arguments.model_dir, input_view=input_view)
+                report = build_benchmark_report(
+                    run_data,
+                    _add_case_ids(items),
+                    arguments.labels,
+                    model=model,
+                    max_crops=arguments.max_crops,
+                )
+                saved_path = write_evaluation_report(report, output_path)
+            payload = {
+                "schema_version": 1,
+                "status": "benchmarked",
+                "output": str(saved_path),
+                "report": report,
+            }
+            run = None
         elif arguments.command == "inspect":
             store = PgVectorStore(arguments.database_url)
             try:
@@ -686,6 +765,10 @@ def _dispatch_embed_command(arguments: argparse.Namespace) -> int:
                 input_view=arguments.input_view,
                 minimum_crop_width=arguments.minimum_crop_width,
                 minimum_crop_height=arguments.minimum_crop_height,
+                reference_manifest=arguments.reference_set,
+                reference_split_mode=arguments.reference_split_mode,
+                reference_min_similarity=arguments.reference_min_similarity,
+                reference_min_agreement=arguments.reference_min_agreement,
             )
             payload = {
                 "schema_version": 1,
@@ -694,6 +777,10 @@ def _dispatch_embed_command(arguments: argparse.Namespace) -> int:
                 "config_fingerprint": run.config_fingerprint,
                 "model_fingerprint": run.model_fingerprint,
                 "candidate_set_fingerprint": run.candidate_set_fingerprint,
+                "reference_set_fingerprint": getattr(
+                    run, "reference_set_fingerprint", None
+                ),
+                "reference_split_mode": getattr(run, "reference_split_mode", None),
                 "candidate_schema_version": getattr(run, "candidate_schema_version", 1),
                 "scoring_fingerprint": run.scoring_fingerprint,
                 "prompt_template": getattr(

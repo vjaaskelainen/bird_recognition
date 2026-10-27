@@ -79,10 +79,42 @@ def build_tagging_config(
     *,
     minimum_crop_width: int = 32,
     minimum_crop_height: int = 32,
+    reference_set_fingerprint: Sha256 | None = None,
+    reference_split_mode: str | None = None,
+    reference_min_similarity: object = None,
+    reference_min_agreement: object = None,
 ) -> TaggingConfig:
     """Build canonical model, candidate, scoring, and decision identities."""
     validated_threshold = validate_threshold(threshold)
     validate_minimum_crop_dimensions(minimum_crop_width, minimum_crop_height)
+    reference_values = (
+        reference_set_fingerprint,
+        reference_split_mode,
+        reference_min_similarity,
+        reference_min_agreement,
+    )
+    if any(value is not None for value in reference_values):
+        if (
+            not isinstance(reference_set_fingerprint, str)
+            or not re.fullmatch(r"[0-9a-f]{64}", reference_set_fingerprint)
+            or reference_split_mode not in {"source_video", "recording_day"}
+        ):
+            raise EmbedValidationError("reference setup identity is invalid")
+        reference = {
+            "set_fingerprint": reference_set_fingerprint,
+            "split_mode": reference_split_mode,
+            "minimum_similarity": _validate_reference_fraction(
+                reference_min_similarity, "minimum similarity"
+            ),
+            "minimum_agreement": _validate_reference_fraction(
+                reference_min_agreement, "minimum agreement"
+            ),
+            "algorithm_version": "top-five-cosine-consensus-v1",
+        }
+    elif any(value is not None for value in reference_values[1:]):
+        raise EmbedValidationError("reference setup identity is incomplete")
+    else:
+        reference = None
     prompt_template, prompt_version = _prompt_identity(candidate_set.schema_version)
     scoring = {
         "schema_version": 1,
@@ -114,6 +146,8 @@ def build_tagging_config(
         "minimum_crop_width": minimum_crop_width,
         "minimum_crop_height": minimum_crop_height,
     }
+    if reference is not None:
+        canonical["reference"] = reference
     canonical_json = canonical_json_bytes(canonical).decode("utf-8")
     return TaggingConfig(
         config_fingerprint=canonical_json_sha256(canonical),
@@ -128,7 +162,29 @@ def build_tagging_config(
         canonical_json=canonical_json,
         minimum_crop_width=minimum_crop_width,
         minimum_crop_height=minimum_crop_height,
+        reference_set_fingerprint=reference_set_fingerprint,
+        reference_split_mode=reference_split_mode,
+        reference_min_similarity=(
+            reference["minimum_similarity"] if reference is not None else None
+        ),
+        reference_min_agreement=(
+            reference["minimum_agreement"] if reference is not None else None
+        ),
     )
+
+
+def _validate_reference_fraction(value: object, name: str) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float, str)):
+        raise EmbedValidationError(f"reference {name} must be finite and within [0, 1]")
+    try:
+        result = float(value)
+    except OverflowError, ValueError:
+        raise EmbedValidationError(
+            f"reference {name} must be finite and within [0, 1]"
+        ) from None
+    if not math.isfinite(result) or not 0 <= result <= 1:
+        raise EmbedValidationError(f"reference {name} must be finite and within [0, 1]")
+    return 0.0 if result == 0 else result
 
 
 def validate_minimum_crop_dimensions(width: object, height: object) -> tuple[int, int]:
@@ -315,6 +371,7 @@ def resolve_embed_configuration(
         "inspect": ("database_url",),
         "evaluate-species": ("database_url",),
         "compare-species": ("database_url",),
+        "benchmark-species": ("database_url",),
         "search": ("database_url", "model_dir"),
     }
     if command not in required_by_command:

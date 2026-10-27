@@ -548,6 +548,60 @@ def test_build_tagging_config_fingerprints_minimum_crop_dimensions(
         build_tagging_config(model_record, candidates, minimum_crop_width=0)
 
 
+def test_build_tagging_config_fingerprints_reference_setup_without_changing_scores(
+    model_record: EmbeddingModelRecord, tmp_path: Path
+) -> None:
+    candidates = load_species_candidates(
+        _write_species_file(
+            tmp_path / "species.json",
+            json.dumps(_species_document([{"id": "bird", "name": "Bird"}])),
+        )
+    )
+
+    baseline = build_tagging_config(model_record, candidates)
+    reference = build_tagging_config(
+        model_record,
+        candidates,
+        reference_set_fingerprint="5" * 64,
+        reference_split_mode="source_video",
+        reference_min_similarity=0.8,
+        reference_min_agreement=0.75,
+    )
+
+    assert baseline.scoring_fingerprint == reference.scoring_fingerprint
+    assert baseline.config_fingerprint != reference.config_fingerprint
+    assert reference.reference_set_fingerprint == "5" * 64
+    assert json.loads(reference.canonical_json)["reference"] == {
+        "algorithm_version": "top-five-cosine-consensus-v1",
+        "minimum_agreement": 0.75,
+        "minimum_similarity": 0.8,
+        "set_fingerprint": "5" * 64,
+        "split_mode": "source_video",
+    }
+
+
+@pytest.mark.parametrize("minimum", [True, float("nan"), -0.1, 1.1, "invalid"])
+def test_build_tagging_config_rejects_invalid_reference_criteria(
+    model_record: EmbeddingModelRecord, tmp_path: Path, minimum: object
+) -> None:
+    candidates = load_species_candidates(
+        _write_species_file(
+            tmp_path / "species.json",
+            json.dumps(_species_document([{"id": "bird", "name": "Bird"}])),
+        )
+    )
+
+    with pytest.raises(EmbedValidationError):
+        build_tagging_config(
+            model_record,
+            candidates,
+            reference_set_fingerprint="5" * 64,
+            reference_split_mode="source_video",
+            reference_min_similarity=minimum,
+            reference_min_agreement=0.5,
+        )
+
+
 def test_resolve_embed_configuration_uses_cli_environment_dotenv_then_default() -> None:
     resolved = resolve_embed_configuration(
         "index",

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -20,6 +21,11 @@ from bird_recognition.embed.models import (
     UnconfirmedCommitError,
 )
 from bird_recognition.embed.pipeline import index_crops
+from bird_recognition.embed.reference import (
+    ReferenceExample,
+    ReferenceSet,
+    input_view_fingerprint,
+)
 from tests.unit.embed.fakes import FakeModel, FakeStore, FakeStoreState
 
 
@@ -159,6 +165,72 @@ def test_index_crops_uses_typed_taxonomy_prompts_and_preserves_coarse_candidate(
     assert state.candidate_sets[candidates.candidate_set_fingerprint].candidates[
         0
     ].kind == ("category")
+
+
+@pytest.mark.parametrize(
+    ("reference_examples", "expected_path", "expected_species"),
+    [
+        (3, "reference_match", "bird"),
+        (2, "zero_shot_fallback", "bird"),
+    ],
+)
+def test_index_crops_records_reference_path_and_falls_back_when_too_few_neighbors(
+    tmp_path: Path,
+    model_record: EmbeddingModelRecord,
+    reference_examples: int,
+    expected_path: str,
+    expected_species: str,
+) -> None:
+    snapshots, crop_root = _new_crops(tmp_path, 1)
+    candidates = load_species_candidates(
+        _candidate_file(tmp_path, [{"id": "bird", "name": "Bird"}])
+    )
+    model_identity = replace(
+        model_record,
+        preprocessing_json=json.dumps({"input_view": {"version": "fit-pad-v1"}}),
+    )
+    model = FakeModel(model_identity)
+    references = ReferenceSet(
+        set_id="set",
+        fingerprint="5" * 64,
+        model_fingerprint=model_identity.model_fingerprint,
+        input_view_fingerprint=input_view_fingerprint(model),
+        review_provenance="owner-reviewed",
+        examples=tuple(
+            ReferenceExample(
+                f"reference-{index}",
+                "reference-video",
+                "2025-01-01",
+                "bird",
+                tmp_path / f"reference-{index}.png",
+                (1.0, 0.0, 0.0),
+            )
+            for index in range(reference_examples)
+        ),
+    )
+    state = FakeStoreState()
+
+    run = index_crops(
+        snapshots,
+        crop_root=crop_root,
+        manifest_locator=tmp_path / "manifest.sqlite3",
+        candidates=candidates,
+        model=model,
+        store=FakeStore(state),
+        reference_set=references,
+        reference_min_similarity=0.8,
+        reference_min_agreement=0.75,
+    )
+
+    decision = next(iter(state.decisions.values()))
+    assert run.completed_count == 1
+    assert decision.assigned_species_id == expected_species
+    assert decision.decision_path == expected_path
+    assert decision.reference_set_fingerprint == references.fingerprint
+    assert decision.reference_split_mode == "source_video"
+    assert (decision.reason == "reference_match") == (
+        expected_path == "reference_match"
+    )
 
 
 def test_index_crops_persists_100_results_and_restart_inspects_provenance(

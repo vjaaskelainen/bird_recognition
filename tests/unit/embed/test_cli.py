@@ -101,6 +101,7 @@ def test_cli_parser_exposes_story_one_commands_and_exact_selection_options() -> 
         "inspect",
         "evaluate-species",
         "compare-species",
+        "benchmark-species",
     }
     with pytest.raises(SystemExit) as usage_error:
         parser.parse_args(["inspect"])
@@ -129,6 +130,96 @@ def test_cli_index_accepts_versioned_input_view_and_quality_dimensions() -> None
     assert arguments.input_view == "fit-pad-v1"
     assert arguments.minimum_crop_width == 48
     assert arguments.minimum_crop_height == 40
+
+
+def test_cli_index_accepts_reference_manifest_and_explicit_matching_criteria() -> None:
+    arguments = _build_parser().parse_args(
+        [
+            "index",
+            "--manifest",
+            "manifest.sqlite3",
+            "--species-list",
+            "species.json",
+            "--model-dir",
+            "models",
+            "--reference-set",
+            "references.json",
+            "--reference-split-mode",
+            "recording_day",
+            "--reference-min-similarity",
+            "0.8",
+            "--reference-min-agreement",
+            "0.75",
+        ]
+    )
+
+    assert arguments.reference_set == Path("references.json")
+    assert arguments.reference_split_mode == "recording_day"
+    assert arguments.reference_min_similarity == 0.8
+    assert arguments.reference_min_agreement == 0.75
+
+
+def test_cli_benchmark_requires_run_labels_sample_cap_and_local_assets() -> None:
+    parser = _build_parser()
+
+    with pytest.raises(SystemExit) as missing_arguments:
+        parser.parse_args(["benchmark-species"])
+
+    assert missing_arguments.value.code == 2
+    arguments = parser.parse_args(
+        [
+            "benchmark-species",
+            "--run-id",
+            str(uuid4()),
+            "--labels",
+            "labels.json",
+            "--output",
+            "report.json",
+            "--max-crops",
+            "40",
+            "--model-dir",
+            "models",
+        ]
+    )
+    assert arguments.max_crops == 40
+    assert arguments.model_adapter == "bioclip"
+
+
+def test_cli_benchmark_rejects_unsupported_adapter_without_database_access(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], tmp_path: Path
+) -> None:
+    from bird_recognition.embed import storage
+
+    def unexpected_store(database_url: str) -> None:
+        pytest.fail(f"database should not be accessed: {database_url}")
+
+    monkeypatch.setattr(storage, "PgVectorStore", unexpected_store)
+    labels = _write_shared_labels(tmp_path / "labels.json")
+    result = main(
+        [
+            "benchmark-species",
+            "--run-id",
+            str(uuid4()),
+            "--labels",
+            str(labels),
+            "--output",
+            str(tmp_path / "report.json"),
+            "--max-crops",
+            "20",
+            "--model-dir",
+            str(tmp_path / "model"),
+            "--model-adapter",
+            "network-model",
+            "--database-url",
+            "postgresql://bird@localhost/bird_db",
+            "--json",
+        ]
+    )
+
+    payload = json.loads(capsys.readouterr().out)
+    assert result == 2
+    assert payload["status"] == "preflight_failure"
+    assert "unsupported" in payload["message"]
 
 
 def test_cli_existing_help_does_not_import_bioclip() -> None:

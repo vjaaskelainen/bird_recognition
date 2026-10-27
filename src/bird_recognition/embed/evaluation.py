@@ -8,17 +8,27 @@ import math
 import os
 import subprocess
 import tempfile
+import time
 from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 from uuid import UUID, uuid4
 
+from PIL import Image
+
 from bird_recognition.embed.config import canonical_json_bytes
-from bird_recognition.embed.models import EmbedValidationError, StorageError
+from bird_recognition.embed.manifest import resolve_crop_path
+from bird_recognition.embed.models import (
+    EmbedValidationError,
+    SpeciesCandidate,
+    StorageError,
+)
 from bird_recognition.embed.scoring import (
     RELATIVE_CONFIDENCE_WARNING,
     SINGLE_CANDIDATE_WARNING,
+    score_embeddings,
+    validate_normalized_vector,
 )
 
 
@@ -101,6 +111,7 @@ def build_evaluation_report(
         "candidate_set_fingerprint": run_data.get("candidate_set_fingerprint"),
         "scoring_fingerprint": run_data.get("scoring_fingerprint"),
         "config_fingerprint": run_data.get("config_fingerprint"),
+        "reference": _run_reference_identity(run_data),
         "threshold": run_data.get("threshold"),
         "candidate_count": candidate_count,
         "label_notes": [
@@ -157,6 +168,214 @@ def build_comparison_report(
         "paired_changes": _paired_changes(setups, matched_by_run, paired_case_ids),
         "warnings": _shared_warnings(),
     }
+
+
+def build_benchmark_report(
+    run_data: Mapping[str, Any],
+    items: Sequence[Mapping[str, Any]],
+    labels_path: Path,
+    *,
+    model: Any,
+    max_crops: int,
+) -> dict[str, object]:
+    """Re-evaluate a deterministic bounded cohort with an explicit local model."""
+    if type(max_crops) is not int or not 1 <= max_crops <= 500:
+        raise EmbedValidationError(
+            "max crops must be a positive integer no greater than 500"
+        )
+    labels_document, labels_sha256, _ = load_label_file(labels_path)
+    label_set = _validate_shared_labels(labels_document)
+    if label_set["label_role"] != "held_out_evaluation":
+        raise EmbedValidationError(
+            "benchmark quality evaluation requires held-out labels"
+        )
+    if not model.identity.adapter_version.startswith("bioclip-local-"):
+        raise EmbedValidationError("selected local model adapter is unsupported")
+    candidates = _benchmark_candidates(run_data)
+    candidate_ids = {candidate.id for candidate in candidates}
+    item_by_case: dict[str, list[Mapping[str, Any]]] = {}
+    for item in items:
+        case_id = _item_case_id(item, item.get("provenance"))
+        if case_id:
+            item_by_case.setdefault(case_id, []).append(item)
+    eligible = [
+        (example, item_by_case[example["case_id"]][0])
+        for example in label_set["examples"]
+        if example["truth_kind"] != "unusable"
+        and len(item_by_case.get(example["case_id"], ())) == 1
+    ]
+    selected = sorted(
+        eligible,
+        key=lambda pair: (
+            hashlib.sha256(pair[0]["case_id"].encode("utf-8")).hexdigest(),
+            pair[0]["case_id"],
+        ),
+    )[:max_crops]
+    if not selected:
+        raise EmbedValidationError("benchmark has no uniquely matched eligible crops")
+    if any(
+        example["truth_kind"] == "species"
+        and example["expected_taxon_id"] not in candidate_ids
+        for example, _ in selected
+    ):
+        raise EmbedValidationError(
+            "benchmark labels include species outside the selected candidates"
+        )
+    candidate_document = run_data.get("candidates")
+    if isinstance(candidate_document, Mapping):
+        candidate_document = candidate_document.get(
+            "candidates", candidate_document.get("species")
+        )
+    if not isinstance(candidate_document, list):
+        raise EmbedValidationError("selected run has no persisted candidate list")
+    prompt_config = run_data.get("config")
+    if not isinstance(prompt_config, Mapping):
+        prompt_config = {}
+    scoring_config = prompt_config.get("scoring", {})
+    if not isinstance(scoring_config, Mapping):
+        scoring_config = {}
+    prompt_template = scoring_config.get("prompt_template", "a photo of {name}.")
+    if not isinstance(prompt_template, str):
+        raise EmbedValidationError("selected run prompt identity is invalid")
+    from bird_recognition.embed.config import format_candidate_prompt
+
+    prompts = tuple(
+        format_candidate_prompt(candidate, prompt_template) for candidate in candidates
+    )
+    started = time.perf_counter()
+    try:
+        text_vectors = tuple(
+            validate_normalized_vector(vector) for vector in model.encode_texts(prompts)
+        )
+        if len(text_vectors) != len(candidates):
+            raise EmbedValidationError(
+                "selected local model returned incomplete text vectors"
+            )
+    except EmbedValidationError:
+        raise
+    except Exception:
+        raise EmbedValidationError("selected local model benchmark failed") from None
+    crop_root = run_data.get("crop_root")
+    if not isinstance(crop_root, str) or not crop_root:
+        raise EmbedValidationError("selected run has no crop root for benchmarking")
+    threshold = run_data.get("threshold", 0.5)
+    if (
+        isinstance(threshold, bool)
+        or not isinstance(threshold, (int, float))
+        or not math.isfinite(threshold)
+        or not 0 <= threshold <= 1
+    ):
+        raise EmbedValidationError("selected run threshold is invalid")
+    benchmark_items: list[dict[str, Any]] = []
+    selected_crop_ids: list[str] = []
+    try:
+        for example, item in selected:
+            provenance = item.get("provenance")
+            relative_path = (
+                provenance.get("crop_original_image_path")
+                if isinstance(provenance, Mapping)
+                else None
+            )
+            crop_id = item.get("crop_id")
+            lighting = _item_lighting(item)
+            if not isinstance(relative_path, str) or not isinstance(crop_id, str):
+                raise EmbedValidationError("benchmark crop provenance is incomplete")
+            crop_path = resolve_crop_path(Path(crop_root), relative_path)
+            with Image.open(crop_path) as image:
+                image.load()
+                image_vector = validate_normalized_vector(
+                    model.encode_image(image.convert("RGB"))
+                )
+            decision = score_embeddings(
+                image_vector,
+                text_vectors,
+                candidates,
+                logit_scale=model.identity.logit_scale,
+                threshold=float(threshold),
+            )
+            selected_crop_ids.append(crop_id)
+            benchmark_items.append(
+                {
+                    "crop_id": crop_id,
+                    "case_id": example["case_id"],
+                    "status": "completed",
+                    "lighting": lighting,
+                    "decision": {
+                        "assigned_species_id": decision.assigned_species_id,
+                        "reason": decision.reason,
+                    },
+                    "provenance": provenance,
+                }
+            )
+    except EmbedValidationError:
+        raise
+    except Exception:
+        raise EmbedValidationError("benchmark crop could not be processed") from None
+    elapsed_seconds = time.perf_counter() - started
+    benchmark_run_data = {
+        **run_data,
+        "model_fingerprint": model.identity.model_fingerprint,
+        "candidates": candidate_document,
+    }
+    matched, _ = _evaluate_shared_run(benchmark_run_data, benchmark_items, label_set)
+    setup_identity = {
+        "selected_run_id": str(run_data.get("run_id")),
+        "baseline_model_fingerprint": run_data.get("model_fingerprint"),
+        "baseline_config_fingerprint": run_data.get("config_fingerprint"),
+        "model_fingerprint": model.identity.model_fingerprint,
+        "candidate_set_fingerprint": run_data.get("candidate_set_fingerprint"),
+        "scoring_fingerprint": run_data.get("scoring_fingerprint"),
+        "prompt_template": prompt_template,
+        "prompt_version": scoring_config.get("prompt_version", "species-photo-v1"),
+        "input_view": json.loads(model.identity.preprocessing_json).get("input_view"),
+        "threshold": float(threshold),
+        "max_crops": max_crops,
+        "sample_case_ids": [example["case_id"] for example, _ in selected],
+        "sample_crop_ids": selected_crop_ids,
+    }
+    return {
+        "schema_version": 1,
+        "benchmark_id": str(uuid4()),
+        "benchmarked_at": datetime.now(UTC).isoformat(),
+        "label_set": _label_set_identity(label_set, labels_sha256),
+        "setup": {
+            **setup_identity,
+            "benchmark_setup_fingerprint": hashlib.sha256(
+                canonical_json_bytes(setup_identity)
+            ).hexdigest(),
+            "adapter_version": model.identity.adapter_version,
+        },
+        "max_crops": max_crops,
+        "sample_count": len(selected),
+        "elapsed_seconds": elapsed_seconds,
+        "quality": matched["groups"],
+        "sample_limitations": _sample_limitations(
+            matched["groups"], str(label_set["label_role"])
+        ),
+        "warnings": _shared_warnings(),
+    }
+
+
+def _benchmark_candidates(run_data: Mapping[str, Any]) -> tuple[SpeciesCandidate, ...]:
+    values = run_data.get("candidates")
+    if isinstance(values, Mapping):
+        values = values.get("candidates", values.get("species"))
+    if not isinstance(values, list) or not values:
+        raise EmbedValidationError("selected run has no persisted candidate list")
+    try:
+        return tuple(
+            SpeciesCandidate(
+                id=value["id"],
+                name=value.get("name"),
+                kind=value.get("kind", "species"),
+                common_name=value.get("common_name"),
+                taxonomic_description=value.get("taxonomic_description"),
+                category=value.get("category"),
+            )
+            for value in values
+        )
+    except KeyError, TypeError, EmbedValidationError:
+        raise EmbedValidationError("selected run candidate list is invalid") from None
 
 
 def _validate_shared_labels(document: Mapping[str, Any]) -> dict[str, Any]:
@@ -350,6 +569,7 @@ def _evaluate_shared_run(
         "candidate_set_fingerprint": run_data.get("candidate_set_fingerprint"),
         "scoring_fingerprint": run_data.get("scoring_fingerprint"),
         "config_fingerprint": run_data.get("config_fingerprint"),
+        "reference": _run_reference_identity(run_data),
         "threshold": run_data.get("threshold"),
         "candidate_count": len(candidates),
         "matched_case_count": len(matched),
@@ -401,6 +621,7 @@ def _shared_group_metrics(
         )
     }
     unassigned_reasons: dict[str, int] = {}
+    decision_path_counts: dict[str, int] = {}
     errors: list[dict[str, object]] = []
     for record in records:
         label = record["label"]
@@ -423,6 +644,16 @@ def _shared_group_metrics(
             if not isinstance(decision, Mapping):
                 raise EmbedValidationError("completed run item is missing its decision")
             counts["completed_count"] += 1
+            decision_path = decision.get("decision_path", "zero_shot")
+            if decision_path not in {
+                "zero_shot",
+                "reference_match",
+                "zero_shot_fallback",
+            }:
+                raise EmbedValidationError("persisted decision path is invalid")
+            decision_path_counts[decision_path] = (
+                decision_path_counts.get(decision_path, 0) + 1
+            )
             assigned_id = decision.get("assigned_species_id")
             if assigned_id in (None, "unknown"):
                 counts["unassigned_count"] += 1
@@ -511,6 +742,7 @@ def _shared_group_metrics(
         "any_assignment_coverage": any_assigned / completed if completed else None,
         "processing_coverage": completed / eligible if eligible else None,
         "unassigned_reason_counts": unassigned_reasons,
+        "decision_path_counts": decision_path_counts,
         "errors": errors,
     }
 
@@ -518,6 +750,8 @@ def _shared_group_metrics(
 def _shared_error(
     label: Mapping[str, Any], item: Mapping[str, Any], assigned_id: str, reason: str
 ) -> dict[str, object]:
+    decision = item.get("decision")
+    decision = decision if isinstance(decision, Mapping) else {}
     return {
         "case_id": label["case_id"],
         "crop_id": item["crop_id"],
@@ -525,6 +759,23 @@ def _shared_error(
         "expected_taxon_id": label["expected_taxon_id"],
         "assigned_candidate_id": assigned_id,
         "reason": reason,
+        "decision_path": decision.get("decision_path", "zero_shot"),
+        "reference_set_fingerprint": decision.get("reference_set_fingerprint"),
+        "reference_split_mode": decision.get("reference_split_mode"),
+    }
+
+
+def _run_reference_identity(run_data: Mapping[str, Any]) -> dict[str, object] | None:
+    config = run_data.get("config")
+    reference = config.get("reference") if isinstance(config, Mapping) else None
+    if not isinstance(reference, Mapping):
+        return None
+    return {
+        "set_fingerprint": reference.get("set_fingerprint"),
+        "split_mode": reference.get("split_mode"),
+        "minimum_similarity": reference.get("minimum_similarity"),
+        "minimum_agreement": reference.get("minimum_agreement"),
+        "algorithm_version": reference.get("algorithm_version"),
     }
 
 

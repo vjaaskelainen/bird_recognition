@@ -577,6 +577,8 @@ class PgVectorStore:
                     "SELECT i.*,d.decision_id AS saved_decision_id,"
                     "d.assigned_species_id,d.best_candidate_id,d.confidence,d.reason,"
                     "d.tied_candidate_ids,d.candidate_scores_json,d.warnings_json,"
+                    "d.decision_path,d.reference_set_fingerprint,d.reference_split_mode,"
+                    "d.reference_similarity,d.reference_agreement,d.reference_neighbor_ids,"
                     "d.processed_at AS decision_processed_at,"
                     "s.snapshot_id,s.provenance_sha256,s.crop_sha256,s.source_id,"
                     "s.source_content_sha256,s.source_original_path,s.source_basename,"
@@ -876,8 +878,13 @@ class PgVectorStore:
         connection: psycopg.Connection[Any], decision: SpeciesDecision
     ) -> bool:
         result = connection.execute(
-            "INSERT INTO bird_embed.species_decision VALUES "
-            "(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) "
+            "INSERT INTO bird_embed.species_decision "
+            "(decision_id,representation_id,config_fingerprint,assigned_species_id,"
+            "best_candidate_id,confidence,tied_candidate_ids,candidate_scores_json,"
+            "reason,warnings_json,processed_at,created_run_id,decision_path,"
+            "reference_set_fingerprint,reference_split_mode,reference_similarity,"
+            "reference_agreement,reference_neighbor_ids) "
+            "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) "
             "ON CONFLICT(representation_id,config_fingerprint) DO NOTHING "
             "RETURNING decision_id",
             (
@@ -898,6 +905,12 @@ class PgVectorStore:
                 Jsonb(list(decision.warnings)),
                 decision.processed_at,
                 decision.created_run_id,
+                decision.decision_path,
+                decision.reference_set_fingerprint,
+                decision.reference_split_mode,
+                decision.reference_similarity,
+                decision.reference_agreement,
+                Jsonb(list(decision.reference_neighbor_ids)),
             ),
         )
         return result.fetchone() is not None
@@ -1014,6 +1027,12 @@ def _decision_from_row(row: Any) -> SpeciesDecision:
         warnings=tuple(row["warnings_json"]),
         processed_at=row["processed_at"],
         created_run_id=row["created_run_id"],
+        decision_path=row.get("decision_path", "zero_shot"),
+        reference_set_fingerprint=_strip_or_none(row.get("reference_set_fingerprint")),
+        reference_split_mode=row.get("reference_split_mode"),
+        reference_similarity=row.get("reference_similarity"),
+        reference_agreement=row.get("reference_agreement"),
+        reference_neighbor_ids=tuple(row.get("reference_neighbor_ids") or ()),
     )
 
 
@@ -1081,6 +1100,14 @@ def _item_inspection(row: Any) -> dict[str, object]:
             "tied_candidate_ids": row["tied_candidate_ids"],
             "candidate_scores": row["candidate_scores_json"],
             "warnings": row["warnings_json"],
+            "decision_path": row["decision_path"],
+            "reference_set_fingerprint": _strip_or_none(
+                row["reference_set_fingerprint"]
+            ),
+            "reference_split_mode": row["reference_split_mode"],
+            "reference_similarity": row["reference_similarity"],
+            "reference_agreement": row["reference_agreement"],
+            "reference_neighbor_ids": row["reference_neighbor_ids"],
             "processed_at": _iso(row["decision_processed_at"]),
         }
         if row["snapshot_id"] is not None:

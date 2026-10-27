@@ -238,9 +238,14 @@ def validate_decision(
     if len(tied) > 1:
         valid = (
             decision.best_candidate_id is None
-            and decision.assigned_species_id is None
             and decision.tied_candidate_ids == tied
-            and decision.reason == "exact_tie"
+            and (
+                decision.reason == "exact_tie"
+                and decision.assigned_species_id is None
+                or decision.reason == "reference_match"
+                and decision.decision_path == "reference_match"
+                and decision.assigned_species_id in candidate_ids
+            )
         )
     else:
         best_id = tied[0]
@@ -252,6 +257,9 @@ def validate_decision(
                 and decision.assigned_species_id == best_id
                 or decision.reason == "below_threshold"
                 and decision.assigned_species_id is None
+                or decision.reason == "reference_match"
+                and decision.decision_path == "reference_match"
+                and decision.assigned_species_id in candidate_ids
             )
         )
     if not valid:
@@ -276,6 +284,18 @@ def validate_decision(
             and confidence >= threshold
         ):
             raise EmbedValidationError("decision reason disagrees with threshold")
+    if (
+        decision.reason == "reference_match"
+        and decision.decision_path != "reference_match"
+    ):
+        raise EmbedValidationError(
+            "reference-match reason requires reference provenance"
+        )
+    if (
+        decision.reason != "reference_match"
+        and decision.decision_path == "reference_match"
+    ):
+        raise EmbedValidationError("reference decision path requires a reference match")
     required_warnings = [RELATIVE_CONFIDENCE_WARNING]
     if len(candidate_ids) == 1:
         required_warnings.append(SINGLE_CANDIDATE_WARNING)

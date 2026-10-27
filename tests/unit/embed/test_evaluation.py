@@ -3,18 +3,26 @@ from __future__ import annotations
 import hashlib
 import json
 from collections.abc import Callable
+from dataclasses import replace
 from pathlib import Path
 from uuid import UUID
 
 import pytest
+from PIL import Image
 
 from bird_recognition.embed.config import canonical_json_bytes
 from bird_recognition.embed.evaluation import (
+    build_benchmark_report,
     build_comparison_report,
     build_evaluation_report,
     write_evaluation_report,
 )
-from bird_recognition.embed.models import EmbedValidationError, StorageError
+from bird_recognition.embed.models import (
+    EmbeddingModelRecord,
+    EmbedValidationError,
+    StorageError,
+)
+from tests.unit.embed.fakes import FakeModel
 
 RUN_ID = "00000000-0000-0000-0000-000000000001"
 
@@ -580,6 +588,46 @@ def test_shared_metrics_use_null_denominators_and_count_low_quality_separately(
     assert report["run"]["groups"]["night"]["processing_coverage"] is None
 
 
+def test_shared_evaluation_reports_reference_setup_and_decision_path_provenance(
+    tmp_path: Path,
+) -> None:
+    labels_path = _shared_labels(
+        tmp_path / "reference-labels.json",
+        [_shared_example("case-a", "review-a", "bird-b")],
+    )
+    run_data = _shared_run(RUN_ID, [{"id": "bird-a", "name": "Bird A"}])
+    run_data["config"] = {
+        "reference": {
+            "set_fingerprint": "5" * 64,
+            "split_mode": "source_video",
+            "minimum_similarity": 0.8,
+            "minimum_agreement": 0.75,
+            "algorithm_version": "top-five-cosine-consensus-v1",
+        }
+    }
+    item = _shared_item("crop-a", "case-a", "bird-a", "day")
+    item["decision"] = {
+        "assigned_species_id": "bird-a",
+        "reason": "assigned",
+        "decision_path": "zero_shot_fallback",
+        "reference_set_fingerprint": "5" * 64,
+        "reference_split_mode": "source_video",
+    }
+
+    report = build_evaluation_report(
+        run_data,
+        [item],
+        labels_path,
+        expected_run_id=UUID(RUN_ID),
+    )
+
+    assert report["run"]["reference"]["set_fingerprint"] == "5" * 64
+    day_group = report["run"]["groups"]["day"]
+    assert day_group["decision_path_counts"] == {"zero_shot_fallback": 1}
+    assert day_group["errors"][0]["decision_path"] == "zero_shot_fallback"
+    assert day_group["errors"][0]["reference_set_fingerprint"] == "5" * 64
+
+
 def test_shared_held_out_sample_gate_passes_with_ten_completed_day_and_night(
     tmp_path: Path,
 ) -> None:
@@ -602,6 +650,94 @@ def test_shared_held_out_sample_gate_passes_with_ten_completed_day_and_night(
 
     assert report["run"]["publication_ready"] is True
     assert report["run"]["sample_limitations"] == []
+
+
+def test_benchmark_report_records_quality_timing_and_selected_model_identity(
+    tmp_path: Path, model_record: EmbeddingModelRecord
+) -> None:
+    identity = replace(
+        model_record,
+        adapter_version="bioclip-local-cpu-v1",
+        preprocessing_json=json.dumps({"input_view": {"version": "fit-pad-v1"}}),
+    )
+    model = FakeModel(identity)
+    crop_root = tmp_path / "crops"
+    crop_root.mkdir()
+    Image.new("RGB", (40, 40)).save(crop_root / "crop.png")
+    labels_path = _shared_labels(
+        tmp_path / "benchmark-labels.json",
+        [_shared_example("case-a", "review-a", "bird-a")],
+    )
+    run_data = {
+        **_shared_run(RUN_ID, [{"id": "bird-a", "name": "Bird A"}]),
+        "crop_root": str(crop_root),
+        "threshold": 0.5,
+        "config": {
+            "scoring": {
+                "prompt_template": "a photo of {name}.",
+                "prompt_version": "species-photo-v1",
+            }
+        },
+    }
+    items = [
+        {
+            "crop_id": "crop-a",
+            "case_id": "case-a",
+            "status": "completed",
+            "lighting": "day",
+            "provenance": {"crop_original_image_path": "crop.png"},
+        }
+    ]
+
+    report = build_benchmark_report(
+        run_data,
+        items,
+        labels_path,
+        model=model,
+        max_crops=1,
+    )
+
+    assert report["sample_count"] == 1
+    assert report["elapsed_seconds"] >= 0
+    assert report["setup"]["model_fingerprint"] == identity.model_fingerprint
+    assert report["setup"]["selected_run_id"] == RUN_ID
+    assert report["setup"]["sample_crop_ids"] == ["crop-a"]
+    assert report["quality"]["day"]["species_correct_count"] == 1
+    assert model.identity is identity
+
+
+@pytest.mark.parametrize("max_crops", [0, 501, True])
+def test_benchmark_report_rejects_invalid_crop_caps(
+    tmp_path: Path, model_record: object, max_crops: int
+) -> None:
+    labels_path = _shared_labels(
+        tmp_path / "benchmark-labels.json",
+        [_shared_example("case-a", "review-a", "bird-a")],
+    )
+    model = FakeModel(model_record)
+
+    with pytest.raises(EmbedValidationError, match="max crops"):
+        build_benchmark_report(
+            _run_data(), [], labels_path, model=model, max_crops=max_crops
+        )
+
+
+def test_benchmark_report_rejects_unsupported_local_model_adapter(
+    tmp_path: Path, model_record: object
+) -> None:
+    labels_path = _shared_labels(
+        tmp_path / "benchmark-labels.json",
+        [_shared_example("case-a", "review-a", "bird-a")],
+    )
+
+    with pytest.raises(EmbedValidationError, match="adapter is unsupported"):
+        build_benchmark_report(
+            _run_data(),
+            [],
+            labels_path,
+            model=FakeModel(model_record),
+            max_crops=1,
+        )
 
 
 @pytest.mark.parametrize(

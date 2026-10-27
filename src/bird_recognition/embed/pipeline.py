@@ -41,6 +41,15 @@ from bird_recognition.embed.models import (
     TaggingConfig,
     UnconfirmedCommitError,
 )
+from bird_recognition.embed.reference import (
+    ReferenceMatch,
+    ReferenceSet,
+    encode_reference_examples,
+    input_view_fingerprint,
+    load_reference_manifest,
+    match_reference,
+    validate_reference_split,
+)
 from bird_recognition.embed.scoring import (
     ScoreResult,
     decision_from_score_map,
@@ -69,10 +78,26 @@ def index_manifest(
     input_view: str = "fit-pad-v1",
     minimum_crop_width: int = 32,
     minimum_crop_height: int = 32,
+    reference_manifest: Path | None = None,
+    reference_split_mode: str = "source_video",
+    reference_min_similarity: object = None,
+    reference_min_agreement: object = None,
 ) -> ProcessingRun:
     """Validate all inputs and run indexing against the read-only manifest snapshot."""
     from bird_recognition.embed.bioclip import load_bioclip
 
+    if reference_manifest is None and (
+        reference_split_mode != "source_video"
+        or reference_min_similarity is not None
+        or reference_min_agreement is not None
+    ):
+        raise EmbedValidationError("reference options require --reference-set")
+    if reference_manifest is not None and (
+        reference_min_similarity is None or reference_min_agreement is None
+    ):
+        raise EmbedValidationError(
+            "reference mode requires both minimum similarity and agreement"
+        )
     try:
         manifest = Path(manifest_path).expanduser().resolve(strict=True)
         effective_crop_root = (
@@ -91,13 +116,54 @@ def index_manifest(
         minimum_crop_width, minimum_crop_height
     )
     model = load_bioclip(Path(model_directory).expanduser(), input_view=input_view)
+    reference_set: ReferenceSet | None = None
+    if reference_manifest is not None:
+        reference_set = load_reference_manifest(
+            reference_manifest,
+            model_fingerprint=model.identity.model_fingerprint,
+            input_view_fingerprint=input_view_fingerprint(model),
+        )
+        validate_reference_split(
+            reference_set,
+            [
+                {
+                    "crop_id": snapshot.crop_id,
+                    "source_id": snapshot.source_id,
+                    "capture_time": snapshot.capture_time,
+                    "source_capture_start": snapshot.source_capture_start,
+                }
+                for snapshot in snapshots
+            ],
+            split_mode=reference_split_mode,
+        )
+        species_ids = {
+            candidate.id
+            for candidate in candidates.candidates
+            if candidate.kind == "species"
+        }
+        if any(
+            example.species_id not in species_ids for example in reference_set.examples
+        ):
+            raise EmbedValidationError(
+                "reference species must be present as a species candidate"
+            )
     config = build_tagging_config(
         model.identity,
         candidates,
         validated_threshold,
         minimum_crop_width=minimum_crop_width,
         minimum_crop_height=minimum_crop_height,
+        reference_set_fingerprint=(
+            reference_set.fingerprint if reference_set is not None else None
+        ),
+        reference_split_mode=(
+            reference_split_mode if reference_set is not None else None
+        ),
+        reference_min_similarity=reference_min_similarity,
+        reference_min_agreement=reference_min_agreement,
     )
+    if reference_set is not None:
+        reference_set = encode_reference_examples(reference_set, model)
     return index_crops(
         snapshots,
         crop_root=effective_crop_root,
@@ -107,6 +173,7 @@ def index_manifest(
         store=store,
         threshold=validated_threshold,
         config=config,
+        reference_set=reference_set,
     )
 
 
@@ -122,6 +189,10 @@ def index_crops(
     config: TaggingConfig | None = None,
     minimum_crop_width: int = 32,
     minimum_crop_height: int = 32,
+    reference_set: ReferenceSet | None = None,
+    reference_split_mode: str = "source_video",
+    reference_min_similarity: object = None,
+    reference_min_agreement: object = None,
 ) -> ProcessingRun:
     """Index a stable snapshot list with atomic per-crop commits."""
     validated_threshold = validate_threshold(threshold)
@@ -132,6 +203,14 @@ def index_crops(
         validated_threshold,
         minimum_crop_width=minimum_crop_width,
         minimum_crop_height=minimum_crop_height,
+        reference_set_fingerprint=(
+            reference_set.fingerprint if reference_set is not None else None
+        ),
+        reference_split_mode=(
+            reference_split_mode if reference_set is not None else None
+        ),
+        reference_min_similarity=reference_min_similarity,
+        reference_min_agreement=reference_min_agreement,
     )
     if tagging_config.model_fingerprint != identity.model_fingerprint:
         raise EmbedValidationError("tagging config does not match the loaded model")
@@ -143,6 +222,48 @@ def index_crops(
         raise EmbedValidationError(
             "tagging config does not match the selected threshold"
         )
+    if reference_set is not None and (
+        tagging_config.reference_set_fingerprint != reference_set.fingerprint
+        or tagging_config.reference_split_mode is None
+        or reference_set.model_fingerprint != identity.model_fingerprint
+        or reference_set.input_view_fingerprint != input_view_fingerprint(model)
+    ):
+        raise EmbedValidationError("reference set does not match the selected setup")
+    if reference_set is None and tagging_config.reference_set_fingerprint is not None:
+        raise EmbedValidationError("tagging config requires its reference set")
+    if reference_set is not None:
+        validate_reference_split(
+            reference_set,
+            [
+                {
+                    "crop_id": snapshot.crop_id,
+                    "source_id": snapshot.source_id,
+                    "capture_time": snapshot.capture_time,
+                    "source_capture_start": snapshot.source_capture_start,
+                }
+                for snapshot in snapshots
+            ],
+            split_mode=tagging_config.reference_split_mode,
+        )
+        species_ids = {
+            candidate.id
+            for candidate in candidates.candidates
+            if candidate.kind == "species"
+        }
+        if any(
+            example.species_id not in species_ids for example in reference_set.examples
+        ):
+            raise EmbedValidationError(
+                "reference species must be present as a species candidate"
+            )
+        if any(
+            example.embedding is None
+            or len(validate_normalized_vector(example.embedding)) != identity.dimension
+            for example in reference_set.examples
+        ):
+            raise EmbedValidationError(
+                "reference embeddings are incomplete or incompatible"
+            )
 
     try:
         store.preflight()
@@ -161,6 +282,7 @@ def index_crops(
             model_identity=identity,
             store=store,
             config=tagging_config,
+            reference_set=reference_set,
         )
     finally:
         try:
@@ -183,6 +305,7 @@ def _run_index(
     model_identity: EmbeddingModelRecord,
     store: StoreProtocol,
     config: TaggingConfig,
+    reference_set: ReferenceSet | None = None,
 ) -> ProcessingRun:
     now = datetime.now(UTC)
     run_id = uuid4()
@@ -225,6 +348,8 @@ def _run_index(
         candidate_schema_version=candidates.schema_version,
         prompt_template=config.prompt_template,
         prompt_version=config.prompt_version,
+        reference_set_fingerprint=config.reference_set_fingerprint,
+        reference_split_mode=config.reference_split_mode,
     )
     pending_items = tuple(
         RunItem(
@@ -409,6 +534,30 @@ def _run_index(
                             logit_scale=config.effective_logit_scale,
                             threshold=config.threshold,
                         )
+                reference_match: ReferenceMatch | None = None
+                if reference_set is not None:
+                    reference_match = (
+                        ReferenceMatch(
+                            None,
+                            "zero_shot_fallback",
+                            None,
+                            (),
+                            None,
+                        )
+                        if low_quality
+                        else match_reference(
+                            image_vector,
+                            reference_set,
+                            minimum_similarity=config.reference_min_similarity,
+                            minimum_agreement=config.reference_min_agreement,
+                        )
+                    )
+                    if reference_match.decision_path == "reference_match":
+                        result = replace(
+                            result,
+                            assigned_species_id=reference_match.species_id,
+                            reason="reference_match",
+                        )
             except UnidentifiedImageError, OSError:
                 failure = RunFailure(
                     snapshot.crop_id,
@@ -460,6 +609,14 @@ def _run_index(
                 processed_at=processed_at,
                 created_run_id=run_id,
             )
+            reference_warnings = (
+                (
+                    "Reference similarity and agreement are heuristic match "
+                    "criteria, not calibrated probabilities.",
+                )
+                if reference_set is not None
+                else ()
+            )
             decision = SpeciesDecision(
                 decision_id=uuid4(),
                 representation_id=representation.representation_id,
@@ -470,9 +627,31 @@ def _run_index(
                 tied_candidate_ids=result.tied_candidate_ids,
                 candidate_scores=result.scores,
                 reason=result.reason,
-                warnings=result.warnings,
+                warnings=result.warnings + reference_warnings,
                 processed_at=processed_at,
                 created_run_id=run_id,
+                decision_path=(
+                    reference_match.decision_path
+                    if reference_match is not None
+                    else "zero_shot"
+                ),
+                reference_set_fingerprint=(
+                    reference_set.fingerprint if reference_set is not None else None
+                ),
+                reference_split_mode=(
+                    config.reference_split_mode if reference_set is not None else None
+                ),
+                reference_similarity=(
+                    reference_match.similarity if reference_match is not None else None
+                ),
+                reference_agreement=(
+                    reference_match.agreement if reference_match is not None else None
+                ),
+                reference_neighbor_ids=(
+                    reference_match.retained_reference_ids
+                    if reference_match is not None
+                    else ()
+                ),
             )
             completed_item = RunItem(
                 run_id=run_id,
@@ -617,6 +796,8 @@ def _finalize(
         candidate_schema_version=run.candidate_schema_version,
         prompt_template=run.prompt_template,
         prompt_version=run.prompt_version,
+        reference_set_fingerprint=run.reference_set_fingerprint,
+        reference_split_mode=run.reference_split_mode,
     )
     try:
         store.finalize_run(final_run)
@@ -672,4 +853,6 @@ def _unfinalized_run(
         candidate_schema_version=run.candidate_schema_version,
         prompt_template=run.prompt_template,
         prompt_version=run.prompt_version,
+        reference_set_fingerprint=run.reference_set_fingerprint,
+        reference_split_mode=run.reference_split_mode,
     )

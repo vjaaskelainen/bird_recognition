@@ -124,7 +124,7 @@ Pair runs by one-to-one `case_id` mappings and use the setup-specific crop ID fo
 
 ## `benchmark-species`
 
-Options: required bounded `--run-id UUID` or explicit crop sample, selected local model adapter/configuration, labels/cohort for quality evaluation, `--output PATH`; required positive `--max-crops N` no greater than 500. Never alter the active/default model. Record selected sample/crop IDs, label-set identity, full model/setup fingerprints, measured quality outcomes, elapsed time, and any unsupported/unavailable configurations. Only installed/supported local adapters can run; no network model lookup or automatic selection.
+Options: required `--run-id UUID`, `--labels PATH`, `--model-dir PATH`, `--output PATH`, and positive `--max-crops N` no greater than 500. The selected run supplies the candidate/prompt/threshold context; labels must be `held_out_evaluation`. `--model-adapter` currently accepts only `bioclip`; `--input-view` may explicitly select a supported local BioCLIP input view and otherwise reproduces the selected run's view. The deterministic hash-ranked cohort is capped before inference. Never alter the active/default model. Record selected sample/crop IDs, label-set identity, baseline and benchmark model/setup fingerprints, measured quality outcomes, elapsed time, and unsupported/unavailable configurations. No network model lookup or automatic selection.
 
 ## `aggregate-visits`
 
@@ -132,7 +132,29 @@ Options: required `--run-id UUID`, external `--groups PATH`, `--output PATH`; op
 
 ## Reference-set manifest and split validation
 
-Reference manifest is external and versioned. Each reference row identifies crop ID, source-video ID (or known capture-day key), reviewed species ID, and compatible model/crop-input identity. Evaluation crop IDs must be disjoint from reference crops and their source videos. If source-video identity is not available, require known and disjoint recording days; otherwise fail closed. Compare cosine similarity to the top five reference examples, retain references meeting `--reference-min-similarity`, and require at least three retained references plus a most-common species fraction meeting `--reference-min-agreement`; otherwise use the general zero-shot decision and record `zero_shot_fallback`. Accepted reference suggestions record `reference_match`. Every result/report includes reference-set fingerprint and decision path.
+Reference manifest is external, version 1, and strict JSON with no duplicate/unknown fields. Its top-level fields are `schema_version`, `set_id`, `model_fingerprint`, `input_view_fingerprint`, `review_provenance`, and nonempty `references`. Each reference row contains `crop_id`, nullable `source_video_id`, nullable ISO `recording_day`, reviewed species ID, local `image_path`, and `image_sha256`. The model/input fingerprints must exactly match the loaded local model; image bytes are checked before encoding. The canonical set hash includes sorted records and image content digests but excludes local paths. Reference species IDs must be species candidates, never category candidates. Evaluation crop IDs and selected split keys must be disjoint; default split mode is `source_video`. If source-video identity is unavailable, the owner must explicitly choose `recording_day` and all days must be known and disjoint; otherwise fail closed. Compare cosine similarity to the top five reference examples, retain references meeting `--reference-min-similarity`, and require at least three retained references plus a most-common species fraction meeting `--reference-min-agreement`; otherwise use the general zero-shot decision and record `zero_shot_fallback`. Accepted reference suggestions record `reference_match`. Every result includes decision path, reference-set fingerprint, split mode, similarity/agreement where measurable, and retained neighbor crop IDs. Reference files and images must be outside Git.
+
+Example manifest shape (values and paths are illustrative):
+
+```json
+{
+  "schema_version": 1,
+  "set_id": "camera-a-reviewed-v1",
+  "model_fingerprint": "64-character-model-sha256",
+  "input_view_fingerprint": "64-character-input-view-sha256",
+  "review_provenance": "owner-reviewed-held-out-references",
+  "references": [
+    {
+      "crop_id": "reference-crop-1",
+      "source_video_id": "reference-source-1",
+      "recording_day": "2025-03-14",
+      "species_id": "parus_major",
+      "image_path": "reference-crops/crop-1.png",
+      "image_sha256": "64-character-image-sha256"
+    }
+  ]
+}
+```
 
 ## Report privacy and interpretation
 

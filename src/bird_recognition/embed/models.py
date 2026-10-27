@@ -332,6 +332,10 @@ class TaggingConfig:
     canonical_json: str
     minimum_crop_width: int = 32
     minimum_crop_height: int = 32
+    reference_set_fingerprint: Sha256 | None = None
+    reference_split_mode: Literal["source_video", "recording_day"] | None = None
+    reference_min_similarity: float | None = None
+    reference_min_agreement: float | None = None
 
     def __post_init__(self) -> None:
         for name in (
@@ -359,6 +363,26 @@ class TaggingConfig:
             raise EmbedValidationError(
                 "minimum crop dimensions must be positive integers"
             )
+        reference_values = (
+            self.reference_set_fingerprint,
+            self.reference_split_mode,
+            self.reference_min_similarity,
+            self.reference_min_agreement,
+        )
+        if any(value is not None for value in reference_values):
+            if (
+                self.reference_set_fingerprint is None
+                or not _SHA256_PATTERN.fullmatch(self.reference_set_fingerprint)
+                or self.reference_split_mode not in {"source_video", "recording_day"}
+                or any(
+                    value is None or not math.isfinite(value) or not 0 <= value <= 1
+                    for value in (
+                        self.reference_min_similarity,
+                        self.reference_min_agreement,
+                    )
+                )
+            ):
+                raise EmbedValidationError("reference setup identity is invalid")
 
 
 @dataclass(frozen=True, slots=True)
@@ -402,9 +426,92 @@ class SpeciesDecision:
     warnings: tuple[str, ...]
     processed_at: datetime
     created_run_id: UUID
+    decision_path: Literal["zero_shot", "reference_match", "zero_shot_fallback"] = (
+        "zero_shot"
+    )
+    reference_set_fingerprint: Sha256 | None = None
+    reference_split_mode: Literal["source_video", "recording_day"] | None = None
+    reference_similarity: float | None = None
+    reference_agreement: float | None = None
+    reference_neighbor_ids: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         _validate_sha256("config_fingerprint", self.config_fingerprint)
+        if self.decision_path not in {
+            "zero_shot",
+            "reference_match",
+            "zero_shot_fallback",
+        }:
+            raise EmbedValidationError("decision path is invalid")
+        if self.decision_path == "zero_shot":
+            if (
+                any(
+                    value is not None
+                    for value in (
+                        self.reference_set_fingerprint,
+                        self.reference_split_mode,
+                        self.reference_similarity,
+                        self.reference_agreement,
+                    )
+                )
+                or self.reference_neighbor_ids
+            ):
+                raise EmbedValidationError(
+                    "zero-shot decision has reference provenance"
+                )
+        else:
+            if (
+                self.reference_set_fingerprint is None
+                or not _SHA256_PATTERN.fullmatch(self.reference_set_fingerprint)
+                or self.reference_split_mode not in {"source_video", "recording_day"}
+            ):
+                raise EmbedValidationError(
+                    "reference decision provenance is incomplete"
+                )
+            for name in ("reference_similarity", "reference_agreement"):
+                value = getattr(self, name)
+                if value is not None and not math.isfinite(value):
+                    raise EmbedValidationError(
+                        "reference decision metrics must be finite"
+                    )
+            if (
+                self.reference_similarity is not None
+                and not -1 <= self.reference_similarity <= 1
+            ):
+                raise EmbedValidationError(
+                    "reference similarity must be within [-1, 1]"
+                )
+            if (
+                self.reference_agreement is not None
+                and not 0 <= self.reference_agreement <= 1
+            ):
+                raise EmbedValidationError("reference agreement must be within [0, 1]")
+            if self.decision_path == "reference_match" and (
+                self.assigned_species_id is None
+                or self.reason != "reference_match"
+                or self.reference_similarity is None
+                or self.reference_agreement is None
+                or len(self.reference_neighbor_ids) < 3
+            ):
+                raise EmbedValidationError(
+                    "reference match must assign a species candidate"
+                )
+            if len(set(self.reference_neighbor_ids)) != len(
+                self.reference_neighbor_ids
+            ) or any(
+                not isinstance(value, str) or not value.strip()
+                for value in self.reference_neighbor_ids
+            ):
+                raise EmbedValidationError(
+                    "reference neighbor IDs must be unique and nonblank"
+                )
+            if (
+                self.decision_path == "zero_shot_fallback"
+                and self.reason == "reference_match"
+            ):
+                raise EmbedValidationError(
+                    "fallback decision cannot use reference-match reason"
+                )
 
 
 @dataclass(frozen=True, slots=True)
@@ -694,6 +801,8 @@ class ProcessingRun:
     candidate_schema_version: int = 1
     prompt_template: str = "a photo of {name}."
     prompt_version: str = "species-photo-v1"
+    reference_set_fingerprint: Sha256 | None = None
+    reference_split_mode: Literal["source_video", "recording_day"] | None = None
 
     def __post_init__(self) -> None:
         _validate_sha256("config_fingerprint", self.config_fingerprint)
@@ -730,6 +839,16 @@ class ProcessingRun:
             raise EmbedValidationError("unsupported candidate schema version")
         if not self.prompt_template or not self.prompt_version:
             raise EmbedValidationError("candidate prompt identity is required")
+        if (self.reference_set_fingerprint is None) != (
+            self.reference_split_mode is None
+        ):
+            raise EmbedValidationError("run reference setup identity is incomplete")
+        if self.reference_set_fingerprint is not None:
+            _validate_sha256(
+                "reference_set_fingerprint", self.reference_set_fingerprint
+            )
+            if self.reference_split_mode not in {"source_video", "recording_day"}:
+                raise EmbedValidationError("run reference split mode is invalid")
         if (
             self.completed_count + self.skipped_count + self.failed_count
             > self.selected_count
