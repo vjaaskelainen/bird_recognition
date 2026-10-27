@@ -22,7 +22,10 @@ from bird_recognition.embed.config import (
     load_species_candidates,
     validate_local_database_url,
 )
-from bird_recognition.embed.migrate import apply_pending_migrations
+from bird_recognition.embed.migrate import (
+    apply_pending_migrations,
+    latest_migration_version,
+)
 from bird_recognition.embed.models import (
     CropRepresentation,
     EmbeddingModelRecord,
@@ -203,7 +206,7 @@ def test_database_init_is_transactional_and_idempotent(
     first = initialize_database(disposable_embed_schema)
     second = initialize_database(disposable_embed_schema)
 
-    assert first.schema_version == 3
+    assert first.schema_version == latest_migration_version()
     assert first.vector_available
     assert first.changes_applied
     assert not second.changes_applied
@@ -214,20 +217,16 @@ def test_migration_runner_applies_only_missing_revisions(
     disposable_embed_schema: str, tmp_path: Path
 ) -> None:
     initialize_database(disposable_embed_schema)
-    initial_migration = files("bird_recognition.embed").joinpath(
-        "migrations", "001_initial.sql"
-    )
-    species_migration = files("bird_recognition.embed").joinpath(
-        "migrations", "002_species_classification.sql"
-    )
-    (tmp_path / "001_initial.sql").write_text(
-        initial_migration.read_text(encoding="utf-8"), encoding="utf-8"
-    )
-    (tmp_path / "002_species_classification.sql").write_text(
-        species_migration.read_text(encoding="utf-8"), encoding="utf-8"
-    )
-    (tmp_path / "003_test_marker.sql").write_text(
-        "CREATE TABLE bird_embed.migration_003_test_marker (id integer PRIMARY KEY);",
+    migration_directory = files("bird_recognition.embed").joinpath("migrations")
+    for migration in migration_directory.iterdir():
+        if migration.is_file() and migration.name.endswith(".sql"):
+            (tmp_path / migration.name).write_text(
+                migration.read_text(encoding="utf-8"), encoding="utf-8"
+            )
+    test_version = latest_migration_version() + 1
+    (tmp_path / f"{test_version:03d}_test_marker.sql").write_text(
+        f"CREATE TABLE bird_embed.migration_{test_version:03d}_test_marker "
+        "(id integer PRIMARY KEY);",
         encoding="utf-8",
     )
 
@@ -235,9 +234,9 @@ def test_migration_runner_applies_only_missing_revisions(
         first = apply_pending_migrations(connection, tmp_path)
         second = apply_pending_migrations(connection, tmp_path)
 
-    assert first.version == 3
-    assert first.applied_versions == (3,)
-    assert second.version == 3
+    assert first.version == test_version
+    assert first.applied_versions == (test_version,)
+    assert second.version == test_version
     assert second.applied_versions == ()
 
 
@@ -277,8 +276,9 @@ def test_species_candidate_migration_preserves_legacy_candidate_rows(
             ("a" * 64,),
         ).fetchone()
 
-    assert result.version == 3
-    assert result.applied_versions == (2, 3)
+    latest_version = latest_migration_version()
+    assert result.version == latest_version
+    assert result.applied_versions == tuple(range(2, latest_version + 1))
     assert row == (
         1,
         [{"id": "raven", "name": "Common raven"}],
