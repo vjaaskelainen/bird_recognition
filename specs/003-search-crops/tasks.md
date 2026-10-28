@@ -85,15 +85,15 @@ No setup tasks are required; existing CLI, BioCLIP adapter, PostgreSQL/pgvector 
 
 ### Tests for User Story 3
 
-- [ ] T017 [P] [US3] Add offline tests for result identity/provenance fields, missing metadata, unavailable-image retention, and read-only availability checks in `tests/unit/embed/test_search.py`.
-- [ ] T018 [P] [US3] Add storage tests for source/frame, capture-time/timezone, lighting, detection-box/confidence, and selected-context species-decision provenance in `tests/unit/embed/test_storage.py`.
-- [ ] T019 [P] [US3] Add CLI tests for complete JSON result fields, explicit null/unknown metadata, distinct score labels and warnings, and unavailable-image representation in `tests/unit/embed/test_cli.py`.
+- [X] T017 [P] [US3] Add offline tests for result identity/provenance fields, missing metadata, unavailable-image retention, and read-only availability checks in `tests/unit/embed/test_search.py`.
+- [X] T018 [P] [US3] Add storage tests for source/frame, capture-time/timezone, lighting, detection-box/confidence, and selected-context species-decision provenance in `tests/unit/embed/test_storage.py`.
+- [X] T019 [P] [US3] Add CLI tests for complete JSON result fields, explicit null/unknown metadata, distinct score labels and warnings, and unavailable-image representation in `tests/unit/embed/test_cli.py`.
 
 ### Implementation for User Story 3
 
-- [ ] T020 [P] [US3] Extend `src/bird_recognition/embed/storage.py` search records with stable crop/snapshot/representation/decision identities and all available source, frame, capture, lighting, detection, and selected-tagging-context provenance.
-- [ ] T021 [P] [US3] Add a read-only local crop availability check in `src/bird_recognition/embed/search.py`; retain the match, rank, score, and provenance when the locator is missing or unreadable, without decoding, replacing, or re-embedding the image.
-- [ ] T022 [US3] Complete readable and schema-version-1 JSON result formatting in `src/bird_recognition/cli.py`, preserving explicit unknowns and clearly explaining that similarity is relative relevance, species confidence is candidate-relative, and detection confidence is detector output—not proof.
+- [X] T020 [P] [US3] Extend `src/bird_recognition/embed/storage.py` search records with stable crop/snapshot/representation/decision identities and all available source, frame, capture, lighting, detection, and selected-tagging-context provenance.
+- [X] T021 [P] [US3] Add a read-only local crop availability check in `src/bird_recognition/embed/search.py`; retain the match, rank, score, and provenance when the locator is missing or unreadable, without decoding, replacing, or re-embedding the image.
+- [X] T022 [US3] Complete readable and schema-version-1 JSON result formatting in `src/bird_recognition/cli.py`, preserving explicit unknowns and clearly explaining that similarity is relative relevance, species confidence is candidate-relative, and detection confidence is detector output—not proof.
 
 **Checkpoint**: User Story 3 provides inspectable evidence and actionable sanitized failures without turning retrieval scores into identity or occurrence claims.
 

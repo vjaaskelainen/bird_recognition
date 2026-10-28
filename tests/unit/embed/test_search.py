@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import date
 from pathlib import Path
 from types import SimpleNamespace
@@ -486,3 +487,124 @@ def test_execute_search_filters_only_final_assigned_species() -> None:
     )
 
     assert [result.crop_id for result in outcome.results] == ["assigned-crow"]
+
+
+def test_execute_search_retains_result_when_crop_locator_is_unavailable(
+    tmp_path: Path,
+) -> None:
+    vector = (1.0,) + (0.0,) * 511
+    candidate = _candidate("crop-1", vector)
+    missing_path = tmp_path / "moved-crop.jpg"
+    candidate = SimpleNamespace(
+        result=replace(candidate.result, crop_path=missing_path),
+        embedding=candidate.embedding,
+    )
+    context = _context(("crop-1",))
+    model = SimpleNamespace(
+        identity=SimpleNamespace(model_fingerprint=context.model_fingerprint),
+        encode_texts=MagicMock(return_value=(vector,)),
+    )
+
+    outcome = execute_search(
+        SearchRequest(query="owl", run_id=context.run_id),
+        model,
+        MagicMock(),
+        context=context,
+        candidates=(candidate,),
+    )
+
+    result = outcome.results[0]
+    assert result.image_status == "unavailable"
+    assert result.crop_path == missing_path
+    assert (result.rank, result.similarity, result.crop_id) == (1, 1.0, "crop-1")
+    assert result.snapshot_id == "d" * 64
+    assert result.representation_id == UUID("00000000-0000-0000-0000-000000000002")
+    assert result.decision_id == UUID("00000000-0000-0000-0000-000000000003")
+    assert result.source_id == "source-1"
+    assert result.source_video == "camera.mp4"
+    assert result.frame_number == 10
+    assert result.capture_time is None
+    assert result.capture_timezone is None
+    assert result.lighting is Lighting.UNKNOWN
+    assert result.detection_id == "detection-1"
+
+
+def test_execute_search_checks_existing_crop_with_read_only_access(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    vector = (1.0,) + (0.0,) * 511
+    candidate = _candidate("crop-1", vector)
+    crop_path = tmp_path / "crop.jpg"
+    crop_path.write_bytes(b"crop-bytes")
+    candidate = SimpleNamespace(
+        result=replace(candidate.result, crop_path=crop_path),
+        embedding=candidate.embedding,
+    )
+    modes: list[str] = []
+    original_open = Path.open
+
+    def record_open(
+        path: Path, mode: str = "r", *args: object, **kwargs: object
+    ) -> object:
+        modes.append(mode)
+        return original_open(path, mode, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "open", record_open)
+    context = _context(("crop-1",))
+    model = SimpleNamespace(
+        identity=SimpleNamespace(model_fingerprint=context.model_fingerprint),
+        encode_texts=MagicMock(return_value=(vector,)),
+    )
+
+    outcome = execute_search(
+        SearchRequest(query="owl", run_id=context.run_id),
+        model,
+        MagicMock(),
+        context=context,
+        candidates=(candidate,),
+    )
+
+    assert outcome.results[0].image_status == "available"
+    assert modes == ["rb"]
+    assert crop_path.read_bytes() == b"crop-bytes"
+
+
+def test_execute_search_retains_result_when_crop_cannot_be_read(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    vector = (1.0,) + (0.0,) * 511
+    candidate = _candidate("crop-1", vector)
+    crop_path = tmp_path / "unreadable-crop.jpg"
+    crop_path.write_bytes(b"crop-bytes")
+    candidate = SimpleNamespace(
+        result=replace(candidate.result, crop_path=crop_path),
+        embedding=candidate.embedding,
+    )
+    original_open = Path.open
+
+    def reject_crop_read(
+        path: Path, mode: str = "r", *args: object, **kwargs: object
+    ) -> object:
+        if path == crop_path:
+            raise PermissionError("crop access denied")
+        return original_open(path, mode, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "open", reject_crop_read)
+    context = _context(("crop-1",))
+    model = SimpleNamespace(
+        identity=SimpleNamespace(model_fingerprint=context.model_fingerprint),
+        encode_texts=MagicMock(return_value=(vector,)),
+    )
+
+    outcome = execute_search(
+        SearchRequest(query="owl", run_id=context.run_id),
+        model,
+        MagicMock(),
+        context=context,
+        candidates=(candidate,),
+    )
+
+    assert len(outcome.results) == 1
+    assert outcome.results[0].image_status == "unavailable"
+    assert outcome.results[0].rank == 1
+    assert outcome.results[0].similarity == 1.0

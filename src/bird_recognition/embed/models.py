@@ -632,7 +632,7 @@ class SearchResult:
     decision_id: UUID
     config_fingerprint: Sha256
     assigned_species_id: str | None
-    species_confidence: float
+    species_confidence: float | None
     crop_path: Path
     image_status: Literal["available", "unavailable"]
     source_id: str
@@ -661,7 +661,7 @@ class SearchResult:
             or not -1 <= self.similarity <= 1
         ):
             raise SearchValidationError("similarity must be finite and within [-1, 1]")
-        if (
+        if self.species_confidence is not None and (
             not isinstance(self.species_confidence, (int, float))
             or isinstance(self.species_confidence, bool)
             or not math.isfinite(self.species_confidence)

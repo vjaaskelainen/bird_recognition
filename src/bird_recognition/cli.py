@@ -1141,6 +1141,25 @@ def _search_payload(outcome: object) -> dict[str, object]:
                 "decision_id": str(result.decision_id),
                 "crop_path": str(result.crop_path),
                 "image_status": result.image_status,
+                "capture": {
+                    "time": result.capture_time,
+                    "timezone": result.capture_timezone,
+                },
+                "lighting": result.lighting.value,
+                "detection": {
+                    "id": result.detection_id,
+                    "category": result.detection_category,
+                    "confidence": result.detection_confidence,
+                    "box_normalized": list(result.detection_box_normalized),
+                    "crop_box_pixels": list(result.crop_box_pixels),
+                    "frame_width": result.frame_width,
+                    "frame_height": result.frame_height,
+                },
+                "species": {
+                    "assigned_species_id": result.assigned_species_id or "unknown",
+                    "confidence": result.species_confidence,
+                    "config_fingerprint": result.config_fingerprint,
+                },
                 "source": {
                     "source_id": result.source_id,
                     "video": result.source_video,
@@ -1156,13 +1175,61 @@ def _search_payload(outcome: object) -> dict[str, object]:
 
 def _render_search_summary(outcome: object) -> None:
     print(f"Search results: {outcome.returned_count}")
+    print(f"Query: {outcome.request.query}")
     print(f"Run: {outcome.context.run_id}")
-    print("Similarity: cosine relative relevance, not a probability.")
+    print(f"Model fingerprint: {outcome.context.model_fingerprint}")
+    print(f"Tagging config fingerprint: {outcome.context.config_fingerprint}")
+    lighting_filter = (
+        outcome.request.lighting.value
+        if outcome.request.lighting is not None
+        else "none"
+    )
+    print(
+        "Filters: "
+        f"start={outcome.request.start_date or 'none'}, "
+        f"end={outcome.request.end_date or 'none'}, "
+        f"lighting={lighting_filter}, "
+        f"species={outcome.request.species_id or 'none'}"
+    )
+    print("Similarity: cosine relative retrieval relevance, not a probability.")
+    print("Species confidence: relative to the selected candidate set.")
+    print("Detection confidence: detector output, not proof of identity or occurrence.")
     for result in outcome.results:
+        species_id = result.assigned_species_id or "unknown"
+        species_confidence = (
+            f"{result.species_confidence:.6f}"
+            if result.species_confidence is not None
+            else "unknown"
+        )
+        capture_time = result.capture_time or "unknown"
+        capture_timezone = result.capture_timezone or "unknown"
         print(
             f"{result.rank}. {result.crop_id} similarity={result.similarity:.6f} "
-            f"source={result.source_video} frame={result.frame_number} "
-            f"crop={result.crop_path}"
+            f"image={result.image_status} crop={result.crop_path}"
+        )
+        print(
+            f"  Identity: snapshot={result.snapshot_id}, "
+            f"representation={result.representation_id}, decision={result.decision_id}"
+        )
+        print(
+            f"  Source: {result.source_video} ({result.source_id}), "
+            f"frame={result.frame_number}, elapsed={result.elapsed_seconds:.3f}s, "
+            f"original={result.source_original_path}"
+        )
+        print(
+            f"  Capture: time={capture_time}, timezone={capture_timezone}, "
+            f"lighting={result.lighting.value}"
+        )
+        print(
+            f"  Detection: {result.detection_id} ({result.detection_category}), "
+            f"confidence={result.detection_confidence:.6f}, "
+            f"box={result.detection_box_normalized}, "
+            f"crop_box={result.crop_box_pixels}, "
+            f"frame={result.frame_width}x{result.frame_height}"
+        )
+        print(
+            f"  Species: {species_id}, candidate-relative confidence="
+            f"{species_confidence}, config={result.config_fingerprint}"
         )
     for warning in outcome.warnings:
         print(f"Warning: {warning}")

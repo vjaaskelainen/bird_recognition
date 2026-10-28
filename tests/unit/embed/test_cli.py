@@ -11,7 +11,12 @@ from uuid import UUID, uuid4
 import pytest
 
 from bird_recognition.cli import _add_candidate_details, _build_parser, main
-from bird_recognition.embed.models import RunStatus
+from bird_recognition.embed.models import (
+    Lighting,
+    RunStatus,
+    SearchContext,
+    SearchResult,
+)
 
 
 def _write_shared_labels(path: Path, case_id: str = "case-1") -> Path:
@@ -1877,3 +1882,123 @@ def test_cli_search_passes_explicit_metadata_filters_without_query_inference(
         "lighting": "day",
         "species_id": "crow",
     }
+
+
+@pytest.mark.parametrize("json_output", [True, False])
+def test_cli_search_reports_full_provenance_and_distinct_score_meanings(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+    json_output: bool,
+) -> None:
+    from bird_recognition.embed import search, storage
+
+    run_id = UUID("00000000-0000-0000-0000-000000000001")
+    context = SearchContext(
+        run_id=run_id,
+        model_fingerprint="a" * 64,
+        config_fingerprint="b" * 64,
+        candidate_set_fingerprint="c" * 64,
+        candidate_ids=("owl",),
+        selected_crop_ids=("crop-1",),
+    )
+    result = SearchResult(
+        rank=1,
+        similarity=0.75,
+        crop_id="crop-1",
+        snapshot_id="d" * 64,
+        representation_id=UUID("00000000-0000-0000-0000-000000000002"),
+        decision_id=UUID("00000000-0000-0000-0000-000000000003"),
+        config_fingerprint=context.config_fingerprint,
+        assigned_species_id=None,
+        species_confidence=None,
+        crop_path=tmp_path / "missing-crop.jpg",
+        image_status="available",
+        source_id="source-1",
+        source_video="camera.mp4",
+        source_original_path="recordings/camera.mp4",
+        frame_number=10,
+        elapsed_seconds=5.0,
+        capture_time=None,
+        capture_timezone=None,
+        lighting=Lighting.UNKNOWN,
+        detection_id="detection-1",
+        detection_category="animal",
+        detection_confidence=0.9,
+        detection_box_normalized=(0.1, 0.2, 0.5, 0.6),
+        crop_box_pixels=(10, 20, 50, 60),
+        frame_width=100,
+        frame_height=100,
+    )
+    vector = (1.0,) + (0.0,) * 511
+    candidate = search.SearchCandidate(result=result, embedding=vector)
+    store = SimpleNamespace(
+        preflight=lambda *, read_only=False: None,
+        load_search_collection=lambda request: (context, (candidate,)),
+        close=lambda: None,
+    )
+    model = SimpleNamespace(
+        identity=SimpleNamespace(model_fingerprint=context.model_fingerprint),
+        encode_texts=lambda prompts: (vector,),
+    )
+    monkeypatch.setattr(storage, "PgVectorStore", lambda database_url: store)
+    monkeypatch.setattr(
+        "bird_recognition.embed.bioclip.load_bioclip", lambda *args, **kwargs: model
+    )
+
+    arguments = [
+        "search",
+        "owl",
+        "--run-id",
+        str(run_id),
+        "--database-url",
+        "postgresql://bird@localhost/bird_db",
+        "--model-dir",
+        "local-model",
+    ]
+    if json_output:
+        arguments.append("--json")
+
+    exit_code = main(arguments)
+    output = capsys.readouterr()
+
+    assert exit_code == 0
+    assert output.err == ""
+    if not json_output:
+        assert "similarity=" in output.out
+        assert "species confidence" in output.out.casefold()
+        assert "detection confidence" in output.out.casefold()
+        assert "unavailable" in output.out
+        return
+    payload = json.loads(output.out)
+    match = payload["results"][0]
+    assert match["image_status"] == "unavailable"
+    assert match["source"] == {
+        "source_id": "source-1",
+        "video": "camera.mp4",
+        "original_path": "recordings/camera.mp4",
+        "frame_number": 10,
+        "elapsed_seconds": 5.0,
+    }
+    assert match["capture"] == {"time": None, "timezone": None}
+    assert match["lighting"] == "unknown"
+    assert match["detection"] == {
+        "id": "detection-1",
+        "category": "animal",
+        "confidence": 0.9,
+        "box_normalized": [0.1, 0.2, 0.5, 0.6],
+        "crop_box_pixels": [10, 20, 50, 60],
+        "frame_width": 100,
+        "frame_height": 100,
+    }
+    assert match["species"] == {
+        "assigned_species_id": "unknown",
+        "confidence": None,
+        "config_fingerprint": "b" * 64,
+    }
+    assert match["crop_id"] == "crop-1"
+    assert match["snapshot_id"] == "d" * 64
+    assert match["representation_id"] == "00000000-0000-0000-0000-000000000002"
+    assert match["decision_id"] == "00000000-0000-0000-0000-000000000003"
+    assert payload["score"]["name"] == "cosine_similarity"
+    assert any("candidate set" in warning for warning in payload["warnings"])

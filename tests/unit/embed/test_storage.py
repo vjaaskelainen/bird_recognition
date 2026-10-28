@@ -31,7 +31,9 @@ def _crop_row(
     crop_id: str = "crop-1",
     *,
     assigned_species_id: str | None = None,
+    species_confidence: float | None = 0.4,
     capture_time: str | None = None,
+    capture_timezone: str | None = None,
     lighting: str = "unknown",
 ) -> dict[str, object]:
     return {
@@ -41,7 +43,7 @@ def _crop_row(
         "decision_id": UUID("00000000-0000-0000-0000-000000000003"),
         "decision_config": "b" * 64,
         "assigned_species_id": assigned_species_id,
-        "species_confidence": 0.4,
+        "species_confidence": species_confidence,
         "resolved_input_locator": "C:/private/crop.jpg",
         "source_id": "source-1",
         "source_basename": "camera.mp4",
@@ -49,7 +51,7 @@ def _crop_row(
         "frame_number": 10,
         "elapsed_seconds": 5.0,
         "capture_time": capture_time,
-        "capture_timezone": None,
+        "capture_timezone": capture_timezone,
         "lighting": lighting,
         "detection_id": "detection-1",
         "detection_category": "animal",
@@ -243,3 +245,63 @@ def test_load_search_collection_rejects_unknown_species_before_candidate_query(
         )
 
     assert len(statements) == 2
+
+
+def test_load_search_collection_preserves_full_source_and_detection_provenance(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    run = _run_row()
+    run["completed_count"] = 1
+    run["selected_count"] = 1
+    row = _crop_row(
+        assigned_species_id="owl",
+        capture_time="2026-01-02T03:04:05-08:00",
+        capture_timezone="America/Los_Angeles",
+        lighting="night",
+    )
+    _mock_store_connection(monkeypatch, run, [row])
+    store = PgVectorStore("postgresql://bird@localhost/bird_db")
+
+    context, candidates = store.load_search_collection(
+        SearchRequest(query="owl", run_id=run["run_id"])
+    )
+
+    result = candidates[0].result
+    assert result.crop_id == "crop-1"
+    assert result.snapshot_id == "d" * 64
+    assert result.representation_id == row["representation_id"]
+    assert result.decision_id == row["decision_id"]
+    assert result.config_fingerprint == context.config_fingerprint
+    assert result.source_id == "source-1"
+    assert result.source_video == "camera.mp4"
+    assert result.source_original_path == "recordings/camera.mp4"
+    assert (result.frame_number, result.elapsed_seconds) == (10, 5.0)
+    assert (result.capture_time, result.capture_timezone) == (
+        "2026-01-02T03:04:05-08:00",
+        "America/Los_Angeles",
+    )
+    assert result.lighting is Lighting.NIGHT
+    assert result.detection_id == "detection-1"
+    assert result.detection_category == "animal"
+    assert result.detection_confidence == 0.9
+    assert result.detection_box_normalized == (0.1, 0.2, 0.5, 0.6)
+    assert result.crop_box_pixels == (10, 20, 50, 60)
+    assert (result.frame_width, result.frame_height) == (100, 100)
+
+
+def test_load_search_collection_preserves_unknown_assignment_and_null_confidence(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    run = _run_row()
+    run["completed_count"] = 1
+    run["selected_count"] = 1
+    row = _crop_row(species_confidence=None)
+    _mock_store_connection(monkeypatch, run, [row])
+    store = PgVectorStore("postgresql://bird@localhost/bird_db")
+
+    _, candidates = store.load_search_collection(
+        SearchRequest(query="owl", run_id=run["run_id"])
+    )
+
+    assert candidates[0].result.assigned_species_id is None
+    assert candidates[0].result.species_confidence is None
