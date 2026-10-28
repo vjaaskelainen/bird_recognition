@@ -1,6 +1,6 @@
 # Quickstart: Validate Wildlife Species Classification Improvements
 
-**Status**: Planned validation guide. Existing crop review and CSV conversion scripts are prerequisites and will be extended only for shared labels/case identity; no replacement review interface is introduced.
+**Status**: Validation guide for implemented classification interfaces. Existing crop review and CSV conversion scripts support shared labels/case identity; no replacement review interface is introduced. These procedures are not a record of completed private-data validation or measured biological quality.
 
 Run from `C:\code\bird_recognition` in Windows PowerShell. Use the existing `.venv`; if it is absent, stop and ask the developer. Do not activate the environment. This guide does not authorize database resets/services, private model or footage access, or use of private labels/reports; obtain explicit approval for those separate actions.
 

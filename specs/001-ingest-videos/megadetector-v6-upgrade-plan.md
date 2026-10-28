@@ -10,7 +10,11 @@ Upgrade detector inference to MegaDetector V6 without changing the ingestion fea
 
 This is an integration upgrade, not a species-classification feature. MegaDetector still reports animal/person/vehicle detections; it does not identify species.
 
-## Why an upgrade is needed
+## Historical pre-upgrade rationale
+
+The statements below describe the pre-upgrade baseline, not the current
+dependency or adapter. The implemented package uses PyTorch-Wildlife; see the
+validation record and current [Usage](../../docs/usage.md#ingest-local-videos).
 
 - [`pyproject.toml`](../../pyproject.toml) pins `megadetector==10.0.27`. This is a Python package version, not the model's generation.
 - [`detection.py`](../../src/bird_recognition/ingest/detection.py) imports `megadetector.detection.run_detector`, loads a file through `load_detector`, and calls `generate_detections_one_image`. This is the older inference API.
@@ -62,7 +66,7 @@ Owner-confirmed validation on Windows/Python 3.14, after the owner synchronized 
 ### 1. Pin a tested V6 runtime
 
 - Replace the legacy `megadetector` dependency with the official PyTorch-Wildlife package and the exact compatible dependency bounds established by the compatibility gate.
-- Keep dependency changes limited to `pyproject.toml`. Per [`AGENTS.md`](../../AGENTS.md), do not edit `uv.lock` or synchronize dependencies; ask the repository owner to run `uv sync` after approving the manifest change.
+- Follow the current [`AGENTS.md`](../../AGENTS.md) dependency approval and synchronization policy. Declare dependencies in `pyproject.toml` and let uv generate `uv.lock`; never edit the lockfile manually.
 - Record the exact package release, model variant, model license, supported Python/platform combination, and source used to verify the API.
 
 ### 2. Update the MegaDetector adapter
@@ -106,7 +110,7 @@ Owner-confirmed validation on Windows/Python 3.14, after the owner synchronized 
 ## Suggested execution order and completion criteria
 
 1. Resolve variant/license, package API, Python 3.14/platform compatibility, and offline weight-loading gates.
-2. Update `pyproject.toml`; have the owner synchronize the environment; record the tested package and variant.
+2. Update `pyproject.toml` and synchronize under the current `AGENTS.md` policy; record the tested package and variant.
 3. Implement the V6 adapter and model identity/settings changes.
 4. Update and run targeted adapter/pipeline/storage tests, then the repository's Ruff and pytest checks.
 5. Run the opt-in controlled V6 smoke and labeled-sample acceptance evaluation; report measured results without overstating accuracy.

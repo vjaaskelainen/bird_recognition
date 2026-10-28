@@ -6,15 +6,20 @@ are in [Usage](usage.md).
 
 ## Environment setup
 
-Install Python 3.14 and [uv](https://docs.astral.sh/uv/), then from the repository
-root synchronize the environment and install the pre-commit hook:
+Use Python 3.14+ and the repository's existing `.venv`, which must contain
+[uv](https://docs.astral.sh/uv/). If the environment is absent, ask the developer
+to provision it before continuing; the commands below cannot bootstrap it.
+From the repository root, synchronize and install the pre-commit hook:
 
 ```powershell
 .\.venv\Scripts\uv.exe sync
 .\.venv\Scripts\uv.exe run pre-commit install
 ```
 
-`uv sync` synchronizes the project environment and lockfile from `pyproject.toml`.
+Synchronization updates the environment and generates `uv.lock` from
+`pyproject.toml`. Agents may synchronize for an approved task; changes to declared
+dependencies require scoped approval under [`AGENTS.md`](../AGENTS.md). Do not
+edit the generated lockfile manually.
 On first setup, create `.env` from [`.env.example`](../.env.example) if it does not
 already exist; keep local values in `.env` and never commit it:
 
@@ -51,7 +56,11 @@ integration tests separately:
 The real MegaDetector smoke test requires all three
 `BIRD_RECOGNITION_SMOKE_MODEL`, `BIRD_RECOGNITION_SMOKE_CONFIG`, and
 `BIRD_RECOGNITION_SMOKE_IMAGE` values (for example in `.env`); all paths must
-refer to locally available files. Integration tests require
+refer to locally available files. The separate BioCLIP smoke test requires
+`BIRD_RECOGNITION_BIOCLIP_SMOKE_MODEL_DIR` and
+`BIRD_RECOGNITION_BIOCLIP_SMOKE_IMAGE`; it verifies local inference, not biological
+quality. See [`.env.example`](../.env.example) for the full variable inventory.
+Integration tests require
 `BIRD_RECOGNITION_TEST_DATABASE_URL` to point to an approved disposable local
 database. Smoke and integration tests are opt-in and are not part of the default
 unit-test discovery.
@@ -60,13 +69,14 @@ Run one test file or a single test by appending the corresponding path/node ID:
 
 ```powershell
 .\.venv\Scripts\python.exe -m pytest tests\unit\ingest\test_detection.py
-.\.venv\Scripts\python.exe -m pytest tests\unit\ingest\test_detection.py::test_example
+.\.venv\Scripts\python.exe -m pytest tests\unit\ingest\test_detection.py::test_adapter_loads_pinned_mit_api_without_downloads
 ```
 
 See the feature [ingestion quickstart](../specs/001-ingest-videos/quickstart.md)
 and [embedding quickstart](../specs/002-embed-species-tags/quickstart.md) for
 feature-specific fixture expectations, integration prerequisites, and acceptance
-evidence.
+evidence. The [classification quickstart](../specs/004-improve-species-classification/quickstart.md)
+covers shared-label review, comparisons, references, and visit/benchmark checks.
 
 ## Lint, format, and pre-commit
 

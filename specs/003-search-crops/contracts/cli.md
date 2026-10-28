@@ -1,7 +1,7 @@
 # CLI Contract: Text Search over Wildlife Crops
 
-**Status**: Planned local read-only `search` subcommand; existing commands remain
-unchanged. See [data model](../data-model.md) for entity and score rules and
+**Status**: Implemented local read-only `search` subcommand. This interface
+contract is not evidence of measured retrieval quality. See [data model](../data-model.md) for entity and score rules and
 [quickstart](../quickstart.md) for validation scenarios.
 
 ## Invocation and common behavior
@@ -76,8 +76,8 @@ back. Reuse existing variables only:
 | `--model-dir` | `BIRD_RECOGNITION_BIOCLIP_MODEL_DIR` | none; required |
 
 `--run-id`, query, filters, and limit are explicit per-search values and have no
-environment aliases. No new environment setting is planned, so `.env.example` needs
-no addition unless implementation introduces a justified setting. Keep real
+environment aliases. Search reuses the existing environment inventory in
+`.env.example`; it adds no settings. Keep real
 credentials in ignored `.env`; avoid URLs in shell history when possible. Database
 connections must satisfy the project's local PostgreSQL validation.
 

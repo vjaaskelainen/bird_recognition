@@ -1,10 +1,10 @@
 # CLI Contract: Species Classification Quality and Optional Decision Paths
 
-**Status**: Planned extension to the local CLI. Existing `ingest`, `index`, `inspect`, `evaluate-species`, blind crop-review, and review-CSV conversion remain available and backward-compatible for historical runs.
+**Status**: Implemented local CLI extensions for classification quality and optional decision paths. Existing `ingest`, `index`, `inspect`, `evaluate-species`, blind crop-review, and review-CSV conversion remain available for historical runs. Interface implementation does not establish biological quality or completion of private-data acceptance checks; record measured evidence separately.
 
 ## Common behavior
 
-- Run locally from repository root in PowerShell using ` .\.venv\Scripts\uv.exe run bird-recognition <command> ...` (omit the leading display space). Use the repository's existing virtual environment; if `.venv` is absent, stop and ask the developer. Do not activate it.
+- Run locally from repository root in PowerShell using `.\.venv\Scripts\uv.exe run bird-recognition <command> ...`. Use the repository's existing virtual environment; if `.venv` is absent, stop and ask the developer. Do not activate it.
 - Commands requiring model inference use only validated, externally provisioned local assets; no download/network fallback. Pure comparison, inspection, score-margin, reference matching, and visit aggregation logic must be testable with fakes and without a live model.
 - JSON output uses explicit schema versions and stable IDs. Diagnostics go to stderr; machine-readable JSON output contains no progress logs, secrets, database URLs, or raw private image paths.
 - Labels, review exports, reference manifests/embeddings, and generated reports must be outside all Git repositories. Refuse unsafe destinations and accidental overwrite. Source videos/crops are never uploaded or committed.

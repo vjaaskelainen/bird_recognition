@@ -65,8 +65,8 @@ stories; no search, Q&A, UI, taxonomy service, top-k, or multi-user feature.
 
 No constitutional exceptions. Before writing feature code, verify the selected
 OpenCLIP/psycopg/pgvector releases against Python 3.14 and existing torch/torchvision
-constraints. Edit dependency declarations only in `pyproject.toml` under repository
-guidance; the developer performs `uv sync`. Do not downgrade Python or replace
+constraints. Follow the current [AGENTS.md](../../AGENTS.md) dependency approval
+and synchronization policy; uv generates the lockfile. Do not downgrade Python or replace
 BioCLIP/storage if compatibility fails: report the blocker. Planning performed no
 installation or model provisioning.
 

@@ -182,7 +182,7 @@ T014 src/bird_recognition/cli.py
 - `[P]` means the task touches a different file and has no dependency on unfinished work.
 - `[US#]` maps to the corresponding prioritized story in `spec.md`.
 - Keep all tests offline; the optional real-model smoke test must not be part of the default suite.
-- Do not edit `uv.lock`; dependency changes are declared in `pyproject.toml` and synchronized by the owner as required in `AGENTS.md`.
+- Follow the current [AGENTS.md](../../AGENTS.md) dependency approval and synchronization policy; uv generates `uv.lock`, which must not be edited manually. Owner-run synchronization requirements in completed tasks below and above record the policy at implementation time, not a current restriction on agents.
 
 
 

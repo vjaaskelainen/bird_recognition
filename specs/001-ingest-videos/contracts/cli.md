@@ -1,6 +1,6 @@
 # CLI Contract: Video Ingestion
 
-This contract defines the user-facing local command for feature 001. The proposed installed entry point is `bird-recognition`; the command is `ingest`.
+This contract defines the user-facing local command for feature 001. The installed entry point is `bird-recognition`; the command is `ingest`.
 
 ## Invocation
 
@@ -8,7 +8,8 @@ This contract defines the user-facing local command for feature 001. The propose
 bird-recognition ingest --input DIR --output DIR [OPTIONS]
 ```
 
-Run from a synced project environment as `uv run bird-recognition ingest ...`.
+Run from the repository root in PowerShell with a synchronized existing
+environment as `.\.venv\Scripts\uv.exe run bird-recognition ingest ...`.
 
 ### Required arguments
 

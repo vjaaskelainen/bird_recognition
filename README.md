@@ -2,7 +2,9 @@
 
 A trail-camera bird-footage search and question-answering project. The implemented
 workflows ingest local video, retain animal crops with provenance, optionally
-suggest species tags for crops, and provide a diagnostic full-frame extractor.
+suggest species tags for crops, search indexed crops with text, and provide a
+diagnostic full-frame extractor. Grounded question answering (Ask/RAG) remains
+future work; there is no implemented answer-generation command.
 Species tags are candidate-relative suggestions, not verified biological
 identifications. See [Usage](docs/usage.md) for operational guidance and
 [Development](docs/development.md) for contributor setup and checks.
@@ -19,7 +21,9 @@ flowchart LR
     Manifest --> Embed
     Embed --> VectorDB[(PostgreSQL and pgvector)]
     VectorDB --> Inspect[Inspect persisted runs]
-    VectorDB --> Evaluate[Evaluate against reviewed labels]
+    VectorDB --> Search[Text search with local BioCLIP]
+    VectorDB --> Evaluate[Evaluate and compare reviewed labels]
+    VectorDB --> Visits[Explicit visit-group reports]
     Videos -. separate diagnostic workflow .-> Extract[Full-frame extraction]
     Extract --> Frames[PNG frames]
 ```
@@ -27,7 +31,9 @@ flowchart LR
 Ingestion and frame extraction operate on local video. Crop embedding and species
 tagging are an optional downstream workflow; they do not replace or modify the
 ingestion manifest or crops. PostgreSQL/pgvector stores embedding runs and
-species decisions for later inspection and evaluation.
+species decisions for inspection, text search, and derived reports. Reference-assisted
+classification is opt-in; visits use explicit owner-reviewed groups and never
+replace per-crop decisions. Model benchmarking performs capped local inference.
 
 ## Video ingestion
 
@@ -63,10 +69,16 @@ provisioning, feature validation, and measured evaluation evidence.
 ## Documentation
 
 - [Usage and local workflows](docs/usage.md): ingestion, frame extraction,
-  database, indexing, inspection, and evaluation.
+  database, indexing, inspection, search, and classification-quality workflows.
 - [Developer setup and checks](docs/development.md): environment, tests, lint,
   formatting, CI, and AI-assisted development.
 - [Ingestion feature documents](specs/001-ingest-videos/): requirements, design,
   contracts, quickstart, and validation evidence.
 - [Embedding and species-tag feature documents](specs/002-embed-species-tags/):
   requirements, design, contracts, quickstart, and validation evidence.
+- [Text-search feature documents](specs/003-search-crops/): read-only retrieval,
+  metadata filters, score interpretation, and validation scenarios.
+- [Classification-quality feature documents](specs/004-improve-species-classification/):
+  crop/input preparation, shared labels, comparisons, references, benchmarks,
+  and explicit visit aggregation. Implemented interfaces do not imply measured
+  biological quality.

@@ -1,4 +1,4 @@
-# _commit: 4a3c16a
+# _commit: b92223e
 _src_path: https://github.com/nlsfi/agent-instructions-template.git
 has_airflow: false
 has_ansible: false

@@ -4,11 +4,13 @@ This guide defines local end-to-end validation for [spec.md](spec.md). Ingestion
 
 ## Prerequisites
 
-- Python 3.14+ and `uv` installed.
+- Python 3.14+ and the existing `.venv` with uv installed. Run commands from the
+  repository root; if `.venv` is absent, stop and ask the developer.
 - Create `.env` from `.env.example` if needed, then set local CLI defaults and
   Compose settings there. The CLI loads it automatically; explicit CLI options
   take precedence over process environment, `.env`, and built-in defaults.
-- Project environment synchronized by the owner after reviewing the runtime dependency change:
+- Project environment synchronized under the current [agent approval policy](../../AGENTS.md)
+  after reviewing any runtime dependency change:
 
   ```powershell
   .\.venv\Scripts\uv.exe sync
@@ -58,7 +60,7 @@ Tests must not download weights, require credentials, or call external services.
 Choose a dedicated destination that is not under the repository or input tree, then:
 
 ```powershell
-uv run bird-recognition ingest `
+.\.venv\Scripts\uv.exe run bird-recognition ingest `
   --input "D:\trail-camera\videos" `
   --output "D:\trail-camera\ingested" `
   --interval 1.0 `
@@ -68,7 +70,7 @@ uv run bird-recognition ingest `
   --model-config "D:\models\config_v9s.yaml"
 ```
 
-Use `uv run bird-recognition ingest --help` to inspect supported options,
+Use `.\.venv\Scripts\uv.exe run bird-recognition ingest --help` to inspect supported options,
 formats, defaults, fixed model variant, and lighting rule. No PostgreSQL/Compose
 service is required.
 
@@ -76,11 +78,12 @@ For an opt-in real-model smoke test, use only a controlled local image/video
 fixture and separately provisioned files. Review labeled local examples against
 absolute animal-recall and person-detection acceptance criteria; a V5 comparison
 is not required. Record misses and false detections before using private batches.
-Set all three `BIRD_RECOGNITION_SMOKE_*` paths in `.env` and explicitly run the
-  test through `dotenv`; smoke tests are outside the default unit-test discovery:
+Set all three `BIRD_RECOGNITION_SMOKE_*` paths in `.env`; the test loads these
+defaults without overriding process environment. Smoke tests are outside the
+default unit-test discovery:
 
 ```powershell
-.\.venv\Scripts\uv.exe run dotenv -f .env run -- pytest tests/smoke/test_detection_smoke.py -q
+.\.venv\Scripts\python.exe -m pytest tests\smoke\test_detection_smoke.py -q
 ```
 
 The test skips when these paths are not set; it is not part of normal offline

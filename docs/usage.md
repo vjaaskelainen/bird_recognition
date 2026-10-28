@@ -30,6 +30,11 @@ extensions are `.mp4`, `.mov`, `.m4v`, `.mkv`, `.avi`, `.mpeg`, and `.mpg`.
 Sampling defaults to one second; animal and person confidence thresholds default
 to `0.2` and qualify inclusively.
 
+Crop context is opt-in: `--crop-policy context-v1` defaults to 10% expansion on
+each side, clipped to the frame; `--crop-context` overrides the fraction. The
+legacy policy defaults to no expansion. Changed effective crop settings create
+new crop identities and preserve historical files and manifest rows.
+
 ```powershell
 .\.venv\Scripts\uv.exe run bird-recognition ingest `
   --input "D:\trail-camera\videos" `
@@ -151,6 +156,15 @@ Use one explicit manifest and inspect the resulting run by its returned ID:
 .\.venv\Scripts\uv.exe run bird-recognition inspect --run-id "<run-id-from-index>" --json
 ```
 
+New index setups default to `--input-view fit-pad-v1`, preserving the complete
+rectangular crop with square padding, and minimum crop dimensions of 32 by 32
+pixels (`--minimum-crop-width` / `--minimum-crop-height`). Undersized crops produce
+completed but unassigned `low_quality` decisions, not inference failures. The
+historical `legacy-center-crop-v1` view remains explicitly selectable. Changing
+the input view changes representation identity and requires compatible new vectors.
+Optional `--minimum-margin` adds a top-two candidate-score gap requirement to
+`--threshold`; below-threshold, below-margin, and tied decisions remain unassigned.
+
 Repeat the index command to retry/resume and skip compatible completed work. To
 retag with a new threshold or candidate file, index the same manifest with the new
 selection; the command creates a versioned decision while reusing compatible
@@ -181,6 +195,75 @@ reviewed results. See the [crop-embedding quickstart](../specs/002-embed-species
 for model provisioning, retry/retag scenarios, acceptance evidence, and the
 measured evaluation results, and the [CLI contract](../specs/002-embed-species-tags/contracts/cli.md)
 for command details.
+
+## Classification quality and optional decision paths
+
+These commands use the configured local database. Keep labels, reference/group
+manifests, assets, and reports outside Git. Reports refuse overwrite; use a new
+output filename and an existing external parent directory. Examples below show
+command forms, not authorization to access private data or start services.
+
+### Blind review and paired comparisons
+
+Use the existing `tools/review_csv.py create`, `tools/review_crops.py`, and
+`tools/review_csv.py to-labels` workflow. Shared schema-2 labels record an
+independent review taxonomy, label role, source-video/day split, and `case_id`.
+A case identifies the unchanged source/frame/detection across crop-policy
+variants; a crop ID identifies one setup-specific saved image. Neither is a visit.
+Keep tuning and held-out cohorts disjoint and do not expose predictions during
+blind review. See the [classification quickstart](../specs/004-improve-species-classification/quickstart.md#1-establish-blind-labels-from-the-existing-workflow)
+for the complete review/export sequence.
+
+Compare at least two explicit run IDs against the same shared labels:
+
+```powershell
+.\.venv\Scripts\uv.exe run bird-recognition compare-species `
+  --run-id "<baseline-run-id>" --run-id "<comparison-run-id>" `
+  --labels "D:\bird-eval\held-out-labels.json" `
+  --output "D:\bird-eval\reports\comparison.json" --json
+```
+
+Comparison reads persisted decisions without model inference. Inspect paired,
+unpaired, failed, low-quality, species, and coarse-category outcomes separately.
+The day/night sample-count gate never proves accuracy; tuning labels cannot
+support publication-quality claims.
+
+### Optional reference-assisted classification
+
+Enable reviewed references explicitly on `index` with `--reference-set PATH`,
+`--reference-min-similarity VALUE`, and `--reference-min-agreement VALUE`.
+The external manifest pins model/input-view identities and reviewed image hashes.
+References must be disjoint from indexed examples under the selected verified
+split: source video by default, or explicit `--reference-split-mode recording_day`
+when every day is known. A qualifying match records `reference_match`; weak or
+inconsistent evidence records `zero_shot_fallback`. These are decision paths,
+not uncertainty reasons such as `below_margin`. Without references, indexing
+uses the zero-shot path. No reference similarity is a biological probability.
+
+### Explicit visits and capped model benchmarks
+
+A visit is an owner-reviewed, confident association of at least two crops from
+one source video, supplied through an external group manifest. Same-video
+membership alone is insufficient. Aggregation averages compatible candidate
+logits and reapplies threshold/margin; the derived report links contributors
+without changing crop-level decisions or inflating crop-level sample counts.
+
+```powershell
+.\.venv\Scripts\uv.exe run bird-recognition aggregate-visits `
+  --run-id "<run-id>" --groups "D:\bird-eval\visit-groups.json" `
+  --output "D:\bird-eval\reports\visits.json" --json
+.\.venv\Scripts\uv.exe run bird-recognition benchmark-species `
+  --run-id "<run-id>" --labels "D:\bird-eval\held-out-labels.json" `
+  --model-dir "D:\bird-models\bioclip" --max-crops 40 `
+  --output "D:\bird-eval\reports\benchmark.json" --json
+```
+
+Benchmarking runs local inference on a deterministic capped held-out cohort
+(`--max-crops` is required and at most 500), reports elapsed time and quality,
+and never changes the default model. Only the supported `bioclip` adapter is
+available; BioCLIP 2 is not silently substituted. See the
+[classification CLI contract](../specs/004-improve-species-classification/contracts/cli.md)
+for exact reference/group schemas, options, report fields, and split rules.
 
 ## Search indexed crops with text
 
