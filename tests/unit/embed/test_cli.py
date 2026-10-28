@@ -1553,3 +1553,196 @@ def test_cli_evaluates_baseline_then_compares_revision_on_shared_labels(
     assert [setup["run_id"] for setup in comparison_report["setups"]] == [
         str(run_id) for run_id in run_ids
     ]
+
+
+def test_cli_search_blank_query_is_input_failure_before_database_access(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from bird_recognition.embed import storage
+
+    def unexpected_store(database_url: str) -> None:
+        pytest.fail(f"database should not be accessed: {database_url}")
+
+    monkeypatch.setattr(storage, "PgVectorStore", unexpected_store)
+    result = main(
+        [
+            "search",
+            "   ",
+            "--run-id",
+            str(uuid4()),
+            "--database-url",
+            "postgresql://bird@localhost/bird_db",
+            "--model-dir",
+            "local-model",
+            "--json",
+        ]
+    )
+
+    payload = json.loads(capsys.readouterr().out)
+    assert result == 2
+    assert payload["status"] == "preflight_failure"
+    assert payload["code"] == "invalid_query"
+
+
+def test_cli_search_operational_failure_is_distinct_from_empty_success(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from bird_recognition.embed import search, storage
+    from bird_recognition.embed.models import SearchOperationalError
+
+    run_id = uuid4()
+    context = SimpleNamespace(
+        run_id=run_id,
+        model_fingerprint="a" * 64,
+        config_fingerprint="b" * 64,
+        candidate_set_fingerprint="c" * 64,
+        candidate_ids=("crow",),
+        selected_crop_ids=(),
+        model_input_view="fit-pad-v1",
+    )
+
+    class ReadOnlyStore:
+        def __init__(self, database_url: str) -> None:
+            del database_url
+
+        def preflight(self, *, read_only: bool = False) -> None:
+            assert read_only
+
+        def load_search_collection(
+            self, selected_run_id: UUID
+        ) -> tuple[object, tuple[object, ...]]:
+            assert selected_run_id == run_id
+            return context, ()
+
+        def close(self) -> None:
+            return None
+
+    monkeypatch.setattr(storage, "PgVectorStore", ReadOnlyStore)
+    monkeypatch.setattr(
+        "bird_recognition.embed.bioclip.load_bioclip", lambda *a, **k: object()
+    )
+
+    def fail_search(*args: object, **kwargs: object) -> None:
+        raise SearchOperationalError("stored vector is invalid")
+
+    monkeypatch.setattr(search, "execute_search", fail_search)
+    result = main(
+        [
+            "search",
+            "owl",
+            "--run-id",
+            str(run_id),
+            "--database-url",
+            "postgresql://bird@localhost/bird_db",
+            "--model-dir",
+            "local-model",
+            "--json",
+        ]
+    )
+
+    payload = json.loads(capsys.readouterr().out)
+    assert result == 1
+    assert payload["status"] == "operational_failure"
+    assert payload["code"] == "invalid_numeric_result"
+    assert "results" not in payload
+
+
+def test_cli_search_requires_query_and_explicit_run_id() -> None:
+    parser = _build_parser()
+    with pytest.raises(SystemExit) as missing:
+        parser.parse_args(["search", "owl"])
+
+    assert missing.value.code == 2
+    arguments = parser.parse_args(
+        ["search", "owl", "--run-id", str(uuid4()), "--limit", "3"]
+    )
+    assert arguments.limit == 3
+
+
+def test_cli_search_emits_successful_empty_json_and_resolves_configuration(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from bird_recognition.embed import search, storage
+
+    run_id = UUID("00000000-0000-0000-0000-000000000001")
+    context = SimpleNamespace(
+        run_id=run_id,
+        model_fingerprint="a" * 64,
+        config_fingerprint="b" * 64,
+        candidate_set_fingerprint="c" * 64,
+        candidate_ids=("crow",),
+        selected_crop_ids=(),
+        model_input_view="fit-pad-v1",
+    )
+    loaded_model_directories: list[Path] = []
+
+    class ReadOnlyStore:
+        def __init__(self, database_url: str) -> None:
+            assert database_url == "postgresql://bird@localhost/bird_db"
+
+        def preflight(self, *, read_only: bool = False) -> None:
+            assert read_only
+
+        def load_search_collection(
+            self, selected_run_id: UUID
+        ) -> tuple[object, tuple[object, ...]]:
+            assert selected_run_id == run_id
+            return context, ()
+
+        def close(self) -> None:
+            return None
+
+    monkeypatch.setattr(storage, "PgVectorStore", ReadOnlyStore)
+    monkeypatch.setattr(
+        "bird_recognition.embed.bioclip.load_bioclip",
+        lambda model_dir, **kwargs: (
+            loaded_model_directories.append(model_dir) or object()
+        ),
+    )
+    monkeypatch.setattr(
+        search,
+        "execute_search",
+        lambda request, model, selected_store, *, context=None, candidates=None: (
+            SimpleNamespace(
+                request=request,
+                context=context,
+                returned_count=0,
+                results=(),
+                warnings=("Similarity is relative relevance, not a probability.",),
+            )
+        ),
+    )
+    monkeypatch.setattr("bird_recognition.cli.find_dotenv", lambda usecwd: "local.env")
+    monkeypatch.setattr(
+        "bird_recognition.cli.dotenv_values",
+        lambda path: {
+            "BIRD_RECOGNITION_DATABASE_URL": "postgresql://dotenv@localhost/dotenv_db",
+            "BIRD_RECOGNITION_BIOCLIP_MODEL_DIR": "dotenv-model",
+        },
+    )
+    monkeypatch.setenv(
+        "BIRD_RECOGNITION_DATABASE_URL", "postgresql://process@localhost/process_db"
+    )
+    monkeypatch.setenv("BIRD_RECOGNITION_BIOCLIP_MODEL_DIR", "process-model")
+
+    result = main(
+        [
+            "search",
+            "owl",
+            "--run-id",
+            str(run_id),
+            "--database-url",
+            "postgresql://bird@localhost/bird_db",
+            "--model-dir",
+            "local-model",
+            "--json",
+        ]
+    )
+
+    payload = json.loads(capsys.readouterr().out)
+    assert result == 0
+    assert payload["status"] == "searched"
+    assert payload["returned_count"] == 0
+    assert payload["results"] == []
+    assert payload["context"]["run_id"] == str(run_id)
+    assert loaded_model_directories == [Path("local-model")]

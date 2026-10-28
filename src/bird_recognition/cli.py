@@ -419,6 +419,15 @@ def _build_parser() -> argparse.ArgumentParser:
     visits_parser.add_argument("--output", required=True, type=Path)
     visits_parser.add_argument("--database-url")
     visits_parser.add_argument("--json", action="store_true")
+    search_parser = commands.add_parser(
+        "search", help="search one indexed run with a local text query"
+    )
+    search_parser.add_argument("query", help="nonblank text query")
+    search_parser.add_argument("--run-id", required=True)
+    search_parser.add_argument("--limit", type=int, default=5)
+    search_parser.add_argument("--database-url")
+    search_parser.add_argument("--model-dir", type=Path)
+    search_parser.add_argument("--json", action="store_true")
     return parser
 
 
@@ -470,6 +479,7 @@ def main(argv: list[str] | None = None, detector: Detector | None = None) -> int
         "compare-species",
         "benchmark-species",
         "aggregate-visits",
+        "search",
     }:
         if arguments.command == "compare-species" and len(arguments.run_id) < 2:
             parser.error("compare-species requires at least two --run-id values")
@@ -602,6 +612,41 @@ def _dispatch_embed_command(arguments: argparse.Namespace) -> int:
             dotenv_environment=dotenv_environment,
         )
         arguments.database_url = resolved["database_url"]
+        if arguments.command == "search":
+            from bird_recognition.embed.bioclip import load_bioclip
+            from bird_recognition.embed.models import SearchRequest
+            from bird_recognition.embed.search import execute_search
+
+            request = SearchRequest(
+                query=arguments.query,
+                run_id=UUID(arguments.run_id),
+                limit=arguments.limit,
+            )
+            with closing(PgVectorStore(arguments.database_url)) as store:
+                try:
+                    store.preflight(read_only=True)
+                except StorageError as error:
+                    raise PreflightError(str(error)) from None
+                context, candidates = store.load_search_collection(request.run_id)
+                model = load_bioclip(
+                    Path(resolved["model_dir"]),
+                    input_view=context.model_input_view,
+                )
+                outcome = execute_search(
+                    request,
+                    model,
+                    store,
+                    context=context,
+                    candidates=candidates,
+                )
+            payload = _search_payload(outcome)
+            if arguments.json:
+                print(
+                    json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str)
+                )
+            else:
+                _render_search_summary(outcome)
+            return 0
         if arguments.command == "database-init":
             result = initialize_database(arguments.database_url)
             payload = {
@@ -901,22 +946,47 @@ def _dispatch_embed_command(arguments: argparse.Namespace) -> int:
         return 0
     except (EmbedValidationError, ValueError, OSError) as error:
         if arguments.json:
-            print(
-                json.dumps(
-                    {
-                        "schema_version": 1,
-                        "status": "preflight_failure",
-                        "code": _preflight_code(error),
-                        "message": sanitize_error(str(error)),
-                        "run_id": None,
-                    },
-                    sort_keys=True,
-                )
+            code = (
+                _search_failure_code(error)
+                if arguments.command == "search"
+                else _preflight_code(error)
             )
+            failure = {
+                "schema_version": 1,
+                "status": "preflight_failure",
+                "code": code,
+                "message": sanitize_error(str(error)),
+            }
+            if arguments.command != "search":
+                failure["run_id"] = None
+            print(json.dumps(failure, sort_keys=True))
         else:
             print(f"Preflight error: {sanitize_error(str(error))}", file=sys.stderr)
         return 2
     except EmbedError as error:
+        if arguments.command == "search":
+            is_preflight = isinstance(error, PreflightError)
+            if arguments.json:
+                print(
+                    json.dumps(
+                        {
+                            "schema_version": 1,
+                            "status": "preflight_failure"
+                            if is_preflight
+                            else "operational_failure",
+                            "code": _search_failure_code(error),
+                            "message": sanitize_error(str(error)),
+                        },
+                        sort_keys=True,
+                    )
+                )
+            else:
+                label = "Preflight error" if is_preflight else "Search operation failed"
+                print(
+                    f"{label}: {sanitize_error(str(error))}",
+                    file=sys.stderr,
+                )
+            return 2 if is_preflight else 1
         is_preflight = (
             isinstance(error, PreflightError) or arguments.command == "database-init"
         )
@@ -972,6 +1042,98 @@ def _preflight_code(error: Exception) -> str:
     if "manifest" in message:
         return "invalid_manifest"
     return "invalid_selection"
+
+
+def _search_failure_code(error: Exception) -> str:
+    message = str(error).casefold()
+    if "query must" in message or "search query" in message:
+        return "invalid_query"
+    if "limit" in message:
+        return "invalid_limit"
+    if "query embedding" in message:
+        return "query_embedding_failed"
+    if "model fingerprint" in message:
+        return "model_mismatch"
+    if "representation" in message:
+        return "incompatible_representation"
+    if "vector" in message or "similarity" in message:
+        return "invalid_numeric_result"
+    if "schema" in message:
+        return "schema_mismatch"
+    if "database" in message or "postgres" in message:
+        return "database_unavailable"
+    if "model" in message or "bioclip" in message:
+        return "model_unavailable"
+    if "species" in message or "candidate" in message:
+        return "invalid_species"
+    if "run" in message or "context" in message:
+        return "invalid_selection"
+    return "invalid_search"
+
+
+def _search_payload(outcome: object) -> dict[str, object]:
+    request = outcome.request
+    context = outcome.context
+    return {
+        "schema_version": 1,
+        "status": "searched",
+        "query": request.query,
+        "filters": {
+            "start_date": None,
+            "end_date": None,
+            "lighting": None,
+            "species_id": None,
+        },
+        "requested_limit": request.limit,
+        "returned_count": outcome.returned_count,
+        "context": {
+            "run_id": str(context.run_id),
+            "model_fingerprint": context.model_fingerprint,
+            "config_fingerprint": context.config_fingerprint,
+            "candidate_set_fingerprint": context.candidate_set_fingerprint,
+        },
+        "score": {
+            "name": "cosine_similarity",
+            "range": [-1, 1],
+            "higher_is_more_similar": True,
+            "interpretation": "relative retrieval relevance; not a probability",
+        },
+        "warnings": list(outcome.warnings),
+        "results": [
+            {
+                "rank": result.rank,
+                "similarity": result.similarity,
+                "crop_id": result.crop_id,
+                "snapshot_id": result.snapshot_id,
+                "representation_id": str(result.representation_id),
+                "decision_id": str(result.decision_id),
+                "crop_path": str(result.crop_path),
+                "image_status": result.image_status,
+                "source": {
+                    "source_id": result.source_id,
+                    "video": result.source_video,
+                    "original_path": result.source_original_path,
+                    "frame_number": result.frame_number,
+                    "elapsed_seconds": result.elapsed_seconds,
+                },
+            }
+            for result in outcome.results
+        ],
+    }
+
+
+def _render_search_summary(outcome: object) -> None:
+    print(f"Search results: {outcome.returned_count}")
+    print(f"Run: {outcome.context.run_id}")
+    print("Similarity: cosine relative relevance, not a probability.")
+    for result in outcome.results:
+        print(
+            f"{result.rank}. {result.crop_id} similarity={result.similarity:.6f} "
+            f"source={result.source_video} frame={result.frame_number} "
+            f"crop={result.crop_path}"
+        )
+    for warning in outcome.warnings:
+        print(f"Warning: {warning}")
 
 
 class _NoInferenceDetector:

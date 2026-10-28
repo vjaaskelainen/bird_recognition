@@ -5,7 +5,8 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
-from typing import Any
+from pathlib import Path
+from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
 import psycopg
@@ -28,11 +29,18 @@ from bird_recognition.embed.models import (
     EmbeddingModelRecord,
     EmbedValidationError,
     IngestedCropSnapshot,
+    Lighting,
     ProcessingRun,
     RunFailure,
     RunItem,
     RunItemStatus,
     RunStatus,
+    SearchContext,
+    SearchContextError,
+    SearchOperationalError,
+    SearchRepresentationError,
+    SearchResult,
+    SearchValidationError,
     Sha256,
     SpeciesCandidate,
     SpeciesCandidateSet,
@@ -42,6 +50,9 @@ from bird_recognition.embed.models import (
     UnconfirmedCommitError,
 )
 from bird_recognition.embed.scoring import validate_decision
+
+if TYPE_CHECKING:
+    from bird_recognition.embed.search import SearchCandidate
 
 _ADVISORY_LOCK_KEY = 0x4252495244454D42
 
@@ -653,6 +664,156 @@ class PgVectorStore:
                 }
         except EmbedValidationError:
             raise
+        except Exception as error:
+            raise _storage_error(error) from None
+
+    def load_search_collection(
+        self, run_id: UUID
+    ) -> tuple[SearchContext, tuple[SearchCandidate, ...]]:
+        """Load one complete run context and its compatible crop vectors read-only."""
+        from bird_recognition.embed.search import SearchCandidate
+
+        try:
+            with psycopg.connect(
+                self._database_url, row_factory=dict_row
+            ) as connection:
+                connection.execute("SET TRANSACTION READ ONLY")
+                register_vector(connection)
+                run = connection.execute(
+                    "SELECT r.run_id,r.status,r.completed_count,r.skipped_count,"
+                    "r.selected_count,t.model_fingerprint,t.config_fingerprint,"
+                    "t.candidate_set_fingerprint,c.candidates_json,m.canonical_json "
+                    "FROM bird_embed.processing_run AS r "
+                    "JOIN bird_embed.tagging_config AS t USING(config_fingerprint) "
+                    "JOIN bird_embed.candidate_set AS c "
+                    "USING(candidate_set_fingerprint) "
+                    "JOIN bird_embed.embedding_model AS m USING(model_fingerprint) "
+                    "WHERE r.run_id=%s",
+                    (run_id,),
+                ).fetchone()
+                if run is None:
+                    raise SearchContextError("run selection was not found")
+                if run["status"] not in {"complete", "no_input"}:
+                    raise SearchContextError(
+                        "selected run must have complete or no_input status"
+                    )
+                candidates_json = run["candidates_json"]
+                model_json = run["canonical_json"]
+                if not isinstance(model_json, dict):
+                    raise SearchContextError(
+                        "selected run has an invalid model identity"
+                    )
+                if not isinstance(candidates_json, list) or any(
+                    not isinstance(value, dict)
+                    or not isinstance(value.get("id"), str)
+                    or not value["id"].strip()
+                    for value in candidates_json
+                ):
+                    raise SearchContextError(
+                        "selected run has an invalid species candidate set"
+                    )
+                candidate_ids = tuple(sorted(value["id"] for value in candidates_json))
+                if not candidate_ids or len(set(candidate_ids)) != len(candidate_ids):
+                    raise SearchContextError(
+                        "selected run has an invalid species candidate set"
+                    )
+                preprocessing = model_json.get("preprocessing", {})
+                input_view = (
+                    preprocessing.get("input_view", {}).get("version")
+                    if isinstance(preprocessing, dict)
+                    and isinstance(preprocessing.get("input_view"), dict)
+                    else None
+                )
+                if input_view not in {"fit-pad-v1", "legacy-center-crop-v1"}:
+                    raise SearchContextError(
+                        "selected model has an unsupported input-view identity"
+                    )
+                context = SearchContext(
+                    run_id=run["run_id"],
+                    model_fingerprint=run["model_fingerprint"].strip(),
+                    config_fingerprint=run["config_fingerprint"].strip(),
+                    candidate_set_fingerprint=run["candidate_set_fingerprint"].strip(),
+                    candidate_ids=candidate_ids,
+                    selected_crop_ids=(),
+                    model_input_view=input_view,
+                )
+                rows = connection.execute(
+                    "SELECT i.crop_id,i.resolved_input_locator,p.representation_id,"
+                    "p.embedding,d.decision_id,d.config_fingerprint AS decision_config,"
+                    "d.assigned_species_id,d.confidence AS species_confidence,"
+                    "s.snapshot_id,s.source_id,s.source_basename,s.source_original_path,"
+                    "s.frame_number,s.elapsed_seconds,s.capture_time,s.capture_timezone,"
+                    "s.lighting,s.detection_id,s.detection_category,"
+                    "s.detection_confidence,s.detection_box_normalized,"
+                    "s.crop_box_pixels,s.frame_width,s.frame_height "
+                    "FROM bird_embed.run_item AS i "
+                    "JOIN bird_embed.processing_run AS r ON r.run_id=i.run_id "
+                    "JOIN bird_embed.species_decision AS d "
+                    "ON d.decision_id=i.decision_id "
+                    "AND d.config_fingerprint=r.config_fingerprint "
+                    "JOIN bird_embed.crop_representation AS p "
+                    "ON p.representation_id=d.representation_id "
+                    "AND p.model_fingerprint=%s "
+                    "AND p.snapshot_id=i.expected_snapshot_id "
+                    "JOIN bird_embed.crop_snapshot AS s "
+                    "ON s.snapshot_id=p.snapshot_id AND s.crop_id=i.crop_id "
+                    "WHERE i.run_id=%s AND i.status IN ('completed','skipped') "
+                    "ORDER BY i.crop_id",
+                    (context.model_fingerprint, run_id),
+                ).fetchall()
+                expected_count = run["completed_count"] + run["skipped_count"]
+                if len(rows) != expected_count:
+                    raise SearchRepresentationError(
+                        "selected run contains missing or incompatible crop "
+                        "representations"
+                    )
+                crop_ids = tuple(row["crop_id"] for row in rows)
+                context = replace(context, selected_crop_ids=crop_ids)
+                search_candidates = []
+                for row in rows:
+                    embedding = tuple(
+                        float(value) for value in row["embedding"].to_list()
+                    )
+                    try:
+                        _validate_embedding(embedding)
+                    except EmbedValidationError as error:
+                        raise SearchOperationalError(
+                            "stored crop representation is invalid"
+                        ) from error
+                    result = SearchResult(
+                        rank=1,
+                        similarity=0.0,
+                        crop_id=row["crop_id"],
+                        snapshot_id=row["snapshot_id"].strip(),
+                        representation_id=row["representation_id"],
+                        decision_id=row["decision_id"],
+                        config_fingerprint=row["decision_config"].strip(),
+                        assigned_species_id=row["assigned_species_id"],
+                        species_confidence=row["species_confidence"],
+                        crop_path=Path(row["resolved_input_locator"]),
+                        image_status="available",
+                        source_id=row["source_id"],
+                        source_video=row["source_basename"],
+                        source_original_path=row["source_original_path"],
+                        frame_number=row["frame_number"],
+                        elapsed_seconds=row["elapsed_seconds"],
+                        capture_time=row["capture_time"],
+                        capture_timezone=row["capture_timezone"],
+                        lighting=Lighting(row["lighting"]),
+                        detection_id=row["detection_id"],
+                        detection_category=row["detection_category"],
+                        detection_confidence=row["detection_confidence"],
+                        detection_box_normalized=tuple(row["detection_box_normalized"]),
+                        crop_box_pixels=tuple(row["crop_box_pixels"]),
+                        frame_width=row["frame_width"],
+                        frame_height=row["frame_height"],
+                    )
+                    search_candidates.append(SearchCandidate(result, embedding))
+                return context, tuple(search_candidates)
+        except SearchContextError, SearchOperationalError:
+            raise
+        except SearchValidationError as error:
+            raise SearchOperationalError("stored search record is invalid") from error
         except Exception as error:
             raise _storage_error(error) from None
 

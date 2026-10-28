@@ -39,16 +39,16 @@ No setup tasks are required; existing CLI, BioCLIP adapter, PostgreSQL/pgvector 
 
 ### Tests for User Story 1
 
-- [ ] T003 [P] [US1] Add offline tests for blank queries, query embedding, vector validation, float64 cosine scoring, stable tie ordering, limits, duplicate identities, and empty outcomes in `tests/unit/embed/test_search.py`.
-- [ ] T004 [P] [US1] Add controlled read-only storage tests for selected-run context, compatible representations, and exclusion of failed/pending or cross-run records in `tests/unit/embed/test_storage.py`.
-- [ ] T005 [P] [US1] Add CLI tests for the unfiltered `search QUERY --run-id UUID` command, configuration resolution, output, and success/empty/input/operational exit behavior in `tests/unit/embed/test_cli.py`.
-- [ ] T006 [P] [US1] Add opt-in PostgreSQL boundary tests for selected-run lookup, compatible crop representations, and read-only search queries in `tests/integration/embed/test_search_storage.py`.
+- [X] T003 [P] [US1] Add offline tests for blank queries, query embedding, vector validation, float64 cosine scoring, stable tie ordering, limits, duplicate identities, and empty outcomes in `tests/unit/embed/test_search.py`.
+- [X] T004 [P] [US1] Add controlled read-only storage tests for selected-run context, compatible representations, and exclusion of failed/pending or cross-run records in `tests/unit/embed/test_storage.py`.
+- [X] T005 [P] [US1] Add CLI tests for the unfiltered `search QUERY --run-id UUID` command, configuration resolution, output, and success/empty/input/operational exit behavior in `tests/unit/embed/test_cli.py`.
+- [X] T006 [P] [US1] Add opt-in PostgreSQL boundary tests for selected-run lookup, compatible crop representations, and read-only search queries in `tests/integration/embed/test_search_storage.py`.
 
 ### Implementation for User Story 1
 
-- [ ] T007 [P] [US1] Implement read-only selected-run and compatible crop-representation retrieval in `src/bird_recognition/embed/storage.py`; accept only `complete` or valid `no_input` runs and keep each search within one run and tagging context.
-- [ ] T008 [P] [US1] Implement query validation/encoding, exact loaded-model fingerprint matching, 512-dimensional finite nonzero normalized-vector checks, float64 cosine computation clamped only for drift to `[-1, 1]`, validation of all eligible scores, deterministic `crop_id` tie-breaking, and top-N selection in `src/bird_recognition/embed/search.py`.
-- [ ] T009 [US1] Add the `search` parser and dispatch in `src/bird_recognition/cli.py` for positional query, required `--run-id`, `--limit` defaulting to 5, database/model configuration, and readable or versioned JSON success/empty/failure outcomes with exit codes 0/1/2.
+- [X] T007 [P] [US1] Implement read-only selected-run and compatible crop-representation retrieval in `src/bird_recognition/embed/storage.py`; accept only `complete` or valid `no_input` runs and keep each search within one run and tagging context.
+- [X] T008 [P] [US1] Implement query validation/encoding, exact loaded-model fingerprint matching, 512-dimensional finite nonzero normalized-vector checks, float64 cosine computation clamped only for drift to `[-1, 1]`, validation of all eligible scores, deterministic `crop_id` tie-breaking, and top-N selection in `src/bird_recognition/embed/search.py`.
+- [X] T009 [US1] Add the `search` parser and dispatch in `src/bird_recognition/cli.py` for positional query, required `--run-id`, `--limit` defaulting to 5, database/model configuration, and readable or versioned JSON success/empty/failure outcomes with exit codes 0/1/2.
 
 **Checkpoint**: User Story 1 supports deterministic text search and successful zero-result searches using offline substitutes.
 

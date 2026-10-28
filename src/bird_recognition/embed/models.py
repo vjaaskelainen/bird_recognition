@@ -582,6 +582,7 @@ class SearchContext:
     candidate_set_fingerprint: Sha256
     candidate_ids: tuple[str, ...]
     selected_crop_ids: tuple[str, ...]
+    model_input_view: str = "fit-pad-v1"
 
     def __post_init__(self) -> None:
         if not isinstance(self.run_id, UUID):
@@ -615,6 +616,8 @@ class SearchContext:
             raise SearchContextError("search context crop IDs must not be blank")
         if len(set(self.selected_crop_ids)) != len(self.selected_crop_ids):
             raise SearchContextError("search context crop IDs must be unique")
+        if self.model_input_view not in {"fit-pad-v1", "legacy-center-crop-v1"}:
+            raise SearchContextError("search context model input view is unsupported")
 
 
 @dataclass(frozen=True, slots=True)
