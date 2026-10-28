@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 import secrets
 from dataclasses import replace
 from datetime import UTC, datetime
@@ -20,7 +19,6 @@ from psycopg.types.json import Jsonb
 from bird_recognition.embed.config import (
     build_tagging_config,
     load_species_candidates,
-    validate_local_database_url,
 )
 from bird_recognition.embed.migrate import (
     apply_pending_migrations,
@@ -105,26 +103,6 @@ class _ConnectionWithFailureAfterStatement:
 
     def __getattr__(self, name: str) -> Any:
         return getattr(self._connection, name)
-
-
-@pytest.fixture
-def database_url() -> str:
-    value = os.environ.get("BIRD_RECOGNITION_TEST_DATABASE_URL")
-    if not value:
-        pytest.skip("explicit disposable test database URL is required")
-    validate_local_database_url(value)
-    if "test" not in urlsplit(value).path.strip("/").casefold():
-        pytest.skip("test database name must include 'test' before schema cleanup")
-    return value
-
-
-@pytest.fixture
-def disposable_embed_schema(database_url: str) -> str:
-    with psycopg.connect(database_url, autocommit=True) as connection:
-        connection.execute("DROP SCHEMA IF EXISTS bird_embed CASCADE")
-    yield database_url
-    with psycopg.connect(database_url, autocommit=True) as connection:
-        connection.execute("DROP SCHEMA IF EXISTS bird_embed CASCADE")
 
 
 def _drop_temporary_test_roles(connection: psycopg.Connection[Any]) -> None:

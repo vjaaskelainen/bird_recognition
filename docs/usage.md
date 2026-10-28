@@ -182,3 +182,76 @@ for model provisioning, retry/retag scenarios, acceptance evidence, and the
 measured evaluation results, and the [CLI contract](../specs/002-embed-species-tags/contracts/cli.md)
 for command details.
 
+## Search indexed crops with text
+
+Search uses one explicitly selected indexed run and its exact model/tagging context.
+The run must be `complete` or a valid empty `no_input` run; partial, failed, or
+incompatible runs are errors, not empty results. Use `inspect --list-runs` to find
+available run IDs, then inspect the selected run before searching. Search requires
+the existing local PostgreSQL/pgvector database and the local BioCLIP ViT-B-16 bundle
+used to create that run's vectors. The loaded model fingerprint must match exactly.
+Search is read-only: it does not migrate the database, download assets, contact a
+service, load crop images for inference, or re-embed stored crops. Keep the database,
+model assets, footage, and crops local and outside Git.
+
+Provide the database URL and model directory with command options or the existing
+`BIRD_RECOGNITION_DATABASE_URL` and `BIRD_RECOGNITION_BIOCLIP_MODEL_DIR` settings.
+Precedence is command-line option, process environment, then discovered `.env`; there
+are no built-in database credential or model-path defaults. Keep credentials private
+and avoid putting database URLs in shell history.
+
+```powershell
+Set-Location 'C:\code\bird_recognition'
+$runId = '<completed-index-run-uuid>'
+$model = 'D:\bird-models\bioclip'
+.\.venv\Scripts\uv.exe run bird-recognition search "squirrel on the feeder" `
+  --run-id $runId `
+  --model-dir $model `
+  --limit 5 `
+  --json
+```
+
+The positional query must be nonblank. Optional `--start-date YYYY-MM-DD` and
+`--end-date YYYY-MM-DD` bounds are inclusive recorded calendar dates; a missing
+capture time does not match a supplied date bound, and timezone conversion is not
+performed. `--lighting` accepts exactly `day` or `night`; unknown lighting does not
+match either. `--species-id` accepts a candidate ID from the selected run or the
+reserved `unknown` value, which selects unassigned decisions rather than best-candidate
+suggestions. All supplied filters are combined over the full eligible set before
+ranking and limiting. Query wording never sets metadata filters.
+
+Results are crop-level evidence with stable crop/representation and selected decision
+identities, source/frame references, and available capture, lighting, detection, and
+species-decision provenance. Missing metadata is shown as `null` or `unknown`. An
+unavailable crop image remains in its ranked position with its score and provenance;
+`image_status` indicates availability. Cosine similarity is relative retrieval
+relevance in `[-1, 1]`, not a probability or confirmation that the query is true.
+Species confidence is candidate-relative, while detection confidence is a separate
+detector score. None proves species identity or event occurrence.
+
+With `--json`, search emits a schema-versioned outcome. Exit `0` means results were
+returned or the valid search found zero matches; the latter is not evidence that an
+event is absent from all footage. Exit `2` indicates invalid input, selection, context,
+or preflight requirements; exit `1` indicates an operational failure. Failures are
+distinct from successful empty searches and do not present partial results as complete.
+See the [search CLI contract](../specs/003-search-crops/contracts/cli.md) and
+[search quickstart](../specs/003-search-crops/quickstart.md) for output fields and
+validation scenarios.
+
+### Optional text-search quality evaluation
+
+Do not claim retrieval quality from controlled tests or unreviewed output. Before
+publishing a quality claim, obtain separate approval for a privacy-reviewed local
+collection and manually label at least 10 distinct text queries. Record each query's
+selected run and model/tagging context, reviewed relevant target crop/frame IDs, and
+the top-five result IDs. Select targets by video or day and review near-duplicate
+frames so consecutive crops are not counted as independent evidence. For each query,
+record whether at least one reviewed relevant item appears in the top five, along with
+notable failures.
+
+Report the hit rate as
+`queries_with_a_relevant_top_five / total_labeled_queries`, including the numerator,
+denominator, selected collection/context, target-selection method, and failure cases.
+Keep footage, crops, labels, and generated reports outside the repository. No measured
+text-search quality is asserted by this guide.
+

@@ -103,10 +103,10 @@ No setup tasks are required; existing CLI, BioCLIP adapter, PostgreSQL/pgvector 
 
 **Purpose**: Document local operation and validate the offline, read-only, and user-facing acceptance criteria.
 
-- [ ] T023 [P] Update `docs/usage.md` with local prerequisites, run/context selection, command examples, configuration precedence, filters and unknown metadata, result inspection, score interpretation, and empty versus failure outcomes.
-- [ ] T024 [P] Document the optional privacy-reviewed evaluation procedure in `docs/usage.md`: at least 10 labeled queries, stable crop/frame IDs, top-five hit-rate numerator/denominator, selected context, reviewed target selection, and failure cases; do not claim unmeasured quality.
-- [ ] T025 Run the documented offline checks from `specs/003-search-crops/quickstart.md` against `tests/unit/embed/` and verify the search path neither mutates indexed data nor requires network/private assets; run the configured lint and format checks before completion.
-- [ ] T026 Validate the opt-in database scenarios in `tests/integration/embed/test_search_storage.py` only against a separately approved disposable local test database; confirm read-only behavior and separation of empty success from missing/incompatible context.
+- [X] T023 [P] Update `docs/usage.md` with local prerequisites, run/context selection, command examples, configuration precedence, filters and unknown metadata, result inspection, score interpretation, and empty versus failure outcomes.
+- [X] T024 [P] Document the optional privacy-reviewed evaluation procedure in `docs/usage.md`: at least 10 labeled queries, stable crop/frame IDs, top-five hit-rate numerator/denominator, selected context, reviewed target selection, and failure cases; do not claim unmeasured quality.
+- [X] T025 Run the documented offline checks from `specs/003-search-crops/quickstart.md` against `tests/unit/embed/` and verify the search path neither mutates indexed data nor requires network/private assets; run the configured lint and format checks before completion.
+- [X] T026 Validate the opt-in database scenarios in `tests/integration/embed/test_search_storage.py` only against a separately approved disposable local test database; confirm read-only behavior and separation of empty success from missing/incompatible context.
 
 ---
 

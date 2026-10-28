@@ -226,3 +226,15 @@ def test_search_storage_loads_only_compatible_selected_run_rows_read_only(
     assert candidates[0].result.assigned_species_id == "crow"
     assert candidates[0].embedding[0] == pytest.approx(1.0)
     assert persisted_count == 3
+
+    empty_context, empty_candidates = store.load_search_collection(
+        SearchRequest(
+            query="crow",
+            run_id=run_id,
+            start_date=date(2026, 10, 26),
+            species_id="crow",
+            limit=1,
+        )
+    )
+    assert empty_context.run_id == run_id
+    assert empty_candidates == ()
