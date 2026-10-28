@@ -1609,9 +1609,9 @@ def test_cli_search_operational_failure_is_distinct_from_empty_success(
             assert read_only
 
         def load_search_collection(
-            self, selected_run_id: UUID
+            self, request: object
         ) -> tuple[object, tuple[object, ...]]:
-            assert selected_run_id == run_id
+            assert request.run_id == run_id
             return context, ()
 
         def close(self) -> None:
@@ -1684,9 +1684,9 @@ def test_cli_search_emits_successful_empty_json_and_resolves_configuration(
             assert read_only
 
         def load_search_collection(
-            self, selected_run_id: UUID
+            self, request: object
         ) -> tuple[object, tuple[object, ...]]:
-            assert selected_run_id == run_id
+            assert request.run_id == run_id
             return context, ()
 
         def close(self) -> None:
@@ -1746,3 +1746,134 @@ def test_cli_search_emits_successful_empty_json_and_resolves_configuration(
     assert payload["results"] == []
     assert payload["context"]["run_id"] == str(run_id)
     assert loaded_model_directories == [Path("local-model")]
+
+
+def test_cli_search_parses_metadata_filters_and_rejects_malformed_values() -> None:
+    parser = _build_parser()
+    run_id = str(uuid4())
+    arguments = parser.parse_args(
+        [
+            "search",
+            "owl at night",
+            "--run-id",
+            run_id,
+            "--start-date",
+            "2026-01-02",
+            "--end-date",
+            "2026-01-03",
+            "--lighting",
+            "day",
+            "--species-id",
+            "crow",
+        ]
+    )
+
+    assert arguments.start_date.isoformat() == "2026-01-02"
+    assert arguments.end_date.isoformat() == "2026-01-03"
+    assert arguments.lighting == "day"
+    assert arguments.species_id == "crow"
+    with pytest.raises(SystemExit) as malformed_date:
+        parser.parse_args(
+            ["search", "owl", "--run-id", run_id, "--start-date", "2026-02-30"]
+        )
+    assert malformed_date.value.code == 2
+    with pytest.raises(SystemExit) as invalid_lighting:
+        parser.parse_args(
+            ["search", "owl", "--run-id", run_id, "--lighting", "unknown"]
+        )
+    assert invalid_lighting.value.code == 2
+
+
+def test_cli_search_passes_explicit_metadata_filters_without_query_inference(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from bird_recognition.embed import search, storage
+
+    run_id = UUID("00000000-0000-0000-0000-000000000001")
+    context = SimpleNamespace(
+        run_id=run_id,
+        model_fingerprint="a" * 64,
+        config_fingerprint="b" * 64,
+        candidate_set_fingerprint="c" * 64,
+        candidate_ids=("crow",),
+        selected_crop_ids=(),
+        model_input_view="fit-pad-v1",
+    )
+    seen_requests: list[object] = []
+
+    class ReadOnlyStore:
+        def __init__(self, database_url: str) -> None:
+            assert database_url == "postgresql://bird@localhost/bird_db"
+
+        def preflight(self, *, read_only: bool = False) -> None:
+            assert read_only
+
+        def load_search_collection(
+            self, request: object
+        ) -> tuple[object, tuple[object, ...]]:
+            assert request.run_id == run_id
+            return context, ()
+
+        def close(self) -> None:
+            return None
+
+    def capture_search_request(
+        request: object,
+        model: object,
+        store: object,
+        *,
+        context: object = None,
+        candidates: tuple[object, ...] | None = None,
+    ) -> object:
+        del model, store, candidates
+        seen_requests.append(request)
+        return SimpleNamespace(
+            request=request,
+            context=context,
+            returned_count=0,
+            results=(),
+            warnings=("Similarity is relative relevance, not a probability.",),
+        )
+
+    monkeypatch.setattr(storage, "PgVectorStore", ReadOnlyStore)
+    monkeypatch.setattr(
+        "bird_recognition.embed.bioclip.load_bioclip", lambda *args, **kwargs: object()
+    )
+    monkeypatch.setattr(search, "execute_search", capture_search_request)
+
+    result = main(
+        [
+            "search",
+            "owl at night on January 2",
+            "--run-id",
+            str(run_id),
+            "--database-url",
+            "postgresql://bird@localhost/bird_db",
+            "--model-dir",
+            "local-model",
+            "--start-date",
+            "2026-01-02",
+            "--end-date",
+            "2026-01-02",
+            "--lighting",
+            "day",
+            "--species-id",
+            "crow",
+            "--json",
+        ]
+    )
+
+    payload = json.loads(capsys.readouterr().out)
+    assert result == 0
+    assert len(seen_requests) == 1
+    request = seen_requests[0]
+    assert request.start_date.isoformat() == "2026-01-02"
+    assert request.end_date.isoformat() == "2026-01-02"
+    assert request.lighting.value == "day"
+    assert request.species_id == "crow"
+    assert payload["filters"] == {
+        "start_date": "2026-01-02",
+        "end_date": "2026-01-02",
+        "lighting": "day",
+        "species_id": "crow",
+    }

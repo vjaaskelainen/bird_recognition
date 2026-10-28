@@ -62,16 +62,16 @@ No setup tasks are required; existing CLI, BioCLIP adapter, PostgreSQL/pgvector 
 
 ### Tests for User Story 2
 
-- [ ] T010 [P] [US2] Add offline tests for strict date parsing/ranges, inclusive recorded calendar-date matching without timezone conversion, missing-date exclusion only under date filtering, day/night matching, assigned species and reserved `unknown`, combined filters before limit, and zero-match success in `tests/unit/embed/test_search.py`.
-- [ ] T011 [P] [US2] Add storage tests proving date, lighting, and final-assigned-species predicates are applied to the complete candidate set before result limiting in `tests/unit/embed/test_storage.py`.
-- [ ] T012 [P] [US2] Add CLI tests for `--start-date`, `--end-date`, `--lighting`, and `--species-id`, malformed values, and explicit filters remaining independent of query wording in `tests/unit/embed/test_cli.py`.
-- [ ] T013 [US2] Extend the opt-in PostgreSQL boundary cases in `tests/integration/embed/test_search_storage.py` to verify combined metadata filters, assigned-species semantics, and filtering before limit.
+- [X] T010 [P] [US2] Add offline tests for strict date parsing/ranges, inclusive recorded calendar-date matching without timezone conversion, missing-date exclusion only under date filtering, day/night matching, assigned species and reserved `unknown`, combined filters before limit, and zero-match success in `tests/unit/embed/test_search.py`.
+- [X] T011 [P] [US2] Add storage tests proving date, lighting, and final-assigned-species predicates are applied to the complete candidate set before result limiting in `tests/unit/embed/test_storage.py`.
+- [X] T012 [P] [US2] Add CLI tests for `--start-date`, `--end-date`, `--lighting`, and `--species-id`, malformed values, and explicit filters remaining independent of query wording in `tests/unit/embed/test_cli.py`.
+- [X] T013 [US2] Extend the opt-in PostgreSQL boundary cases in `tests/integration/embed/test_search_storage.py` to verify combined metadata filters, assigned-species semantics, and filtering before limit.
 
 ### Implementation for User Story 2
 
-- [ ] T014 [P] [US2] Validate strict `YYYY-MM-DD` dates, independently optional inclusive bounds, start-before-or-equal-to-end, exact `day`/`night`, known candidate IDs or reserved `unknown`, and positive whole-number limits in `src/bird_recognition/embed/search.py`.
-- [ ] T015 [P] [US2] Extend the read-only candidate query in `src/bird_recognition/embed/storage.py` to apply all supplied date, lighting, and final-assigned-species predicates before returning candidates for scoring; never qualify a best-candidate suggestion as an assignment.
-- [ ] T016 [US2] Add the four metadata filter options and pass validated explicit values through search dispatch in `src/bird_recognition/cli.py`; do not derive or override filters from query text.
+- [X] T014 [P] [US2] Validate strict `YYYY-MM-DD` dates, independently optional inclusive bounds, start-before-or-equal-to-end, exact `day`/`night`, known candidate IDs or reserved `unknown`, and positive whole-number limits in `src/bird_recognition/embed/search.py`.
+- [X] T015 [P] [US2] Extend the read-only candidate query in `src/bird_recognition/embed/storage.py` to apply all supplied date, lighting, and final-assigned-species predicates before returning candidates for scoring; never qualify a best-candidate suggestion as an assignment.
+- [X] T016 [US2] Add the four metadata filter options and pass validated explicit values through search dispatch in `src/bird_recognition/cli.py`; do not derive or override filters from query text.
 
 **Checkpoint**: User Story 2 returns only crops satisfying every supplied filter, including eligible matches outside the unfiltered top-N, and treats valid empty matches as success.
 

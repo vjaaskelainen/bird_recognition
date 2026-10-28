@@ -10,6 +10,7 @@ import subprocess
 import sys
 from contextlib import closing
 from dataclasses import replace
+from datetime import date
 from pathlib import Path
 
 from dotenv import dotenv_values, find_dotenv
@@ -425,6 +426,10 @@ def _build_parser() -> argparse.ArgumentParser:
     search_parser.add_argument("query", help="nonblank text query")
     search_parser.add_argument("--run-id", required=True)
     search_parser.add_argument("--limit", type=int, default=5)
+    search_parser.add_argument("--start-date", type=_parse_search_date)
+    search_parser.add_argument("--end-date", type=_parse_search_date)
+    search_parser.add_argument("--lighting", choices=("day", "night"))
+    search_parser.add_argument("--species-id")
     search_parser.add_argument("--database-url")
     search_parser.add_argument("--model-dir", type=Path)
     search_parser.add_argument("--json", action="store_true")
@@ -436,6 +441,12 @@ def _parse_extensions(value: str) -> tuple[str, ...]:
     if not extensions:
         raise ValidationError("at least one supported video extension is required")
     return extensions
+
+
+def _parse_search_date(value: str) -> date:
+    from bird_recognition.embed.search import parse_search_date
+
+    return parse_search_date(value)
 
 
 def _render_summary(report: dict[str, object]) -> None:
@@ -587,6 +598,7 @@ def _dispatch_embed_command(arguments: argparse.Namespace) -> int:
     )
     from bird_recognition.embed.models import (
         EmbedError,
+        Lighting,
         PreflightError,
         RunStatus,
         StorageError,
@@ -620,6 +632,14 @@ def _dispatch_embed_command(arguments: argparse.Namespace) -> int:
             request = SearchRequest(
                 query=arguments.query,
                 run_id=UUID(arguments.run_id),
+                start_date=arguments.start_date,
+                end_date=arguments.end_date,
+                lighting=(
+                    Lighting(arguments.lighting)
+                    if arguments.lighting is not None
+                    else None
+                ),
+                species_id=arguments.species_id,
                 limit=arguments.limit,
             )
             with closing(PgVectorStore(arguments.database_url)) as store:
@@ -627,7 +647,7 @@ def _dispatch_embed_command(arguments: argparse.Namespace) -> int:
                     store.preflight(read_only=True)
                 except StorageError as error:
                     raise PreflightError(str(error)) from None
-                context, candidates = store.load_search_collection(request.run_id)
+                context, candidates = store.load_search_collection(request)
                 model = load_bioclip(
                     Path(resolved["model_dir"]),
                     input_view=context.model_input_view,
@@ -1050,6 +1070,10 @@ def _search_failure_code(error: Exception) -> str:
         return "invalid_query"
     if "limit" in message:
         return "invalid_limit"
+    if "date" in message:
+        return "invalid_date"
+    if "lighting" in message:
+        return "invalid_lighting"
     if "query embedding" in message:
         return "query_embedding_failed"
     if "model fingerprint" in message:
@@ -1079,10 +1103,18 @@ def _search_payload(outcome: object) -> dict[str, object]:
         "status": "searched",
         "query": request.query,
         "filters": {
-            "start_date": None,
-            "end_date": None,
-            "lighting": None,
-            "species_id": None,
+            "start_date": (
+                request.start_date.isoformat()
+                if request.start_date is not None
+                else None
+            ),
+            "end_date": (
+                request.end_date.isoformat() if request.end_date is not None else None
+            ),
+            "lighting": request.lighting.value
+            if request.lighting is not None
+            else None,
+            "species_id": request.species_id,
         },
         "requested_limit": request.limit,
         "returned_count": outcome.returned_count,

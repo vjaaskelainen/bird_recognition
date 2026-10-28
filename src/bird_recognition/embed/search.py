@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import math
+import re
 from dataclasses import dataclass, replace
+from datetime import date, datetime
 from pathlib import Path
 from typing import Protocol
-from uuid import UUID
 
 from bird_recognition.embed.models import (
     EmbeddingModelRecord,
@@ -22,6 +23,7 @@ from bird_recognition.embed.models import (
 
 _VECTOR_DIMENSION = 512
 _NORMALIZATION_TOLERANCE = 1e-5
+_DATE_PATTERN = re.compile(r"\d{4}-\d{2}-\d{2}\Z")
 _SEARCH_WARNINGS = (
     "Species confidence is relative to the selected candidate set, not a calibrated "
     "probability of biological correctness.",
@@ -53,7 +55,7 @@ class SearchStore(Protocol):
     """Read-only provider for one selected run's context and crop candidates."""
 
     def load_search_collection(
-        self, run_id: UUID
+        self, request: SearchRequest
     ) -> tuple[SearchContext, tuple[SearchCandidate, ...]]:
         """Load a compatible collection scoped to the supplied run."""
 
@@ -70,7 +72,7 @@ def execute_search(
     if not isinstance(request, SearchRequest):
         raise SearchValidationError("search request is invalid")
     if context is None or candidates is None:
-        loaded_context, loaded_candidates = store.load_search_collection(request.run_id)
+        loaded_context, loaded_candidates = store.load_search_collection(request)
         context = context or loaded_context
         candidates = candidates if candidates is not None else loaded_candidates
     if context.run_id != request.run_id:
@@ -79,8 +81,13 @@ def execute_search(
         raise SearchContextError(
             "loaded model fingerprint does not match the selected run context"
         )
-    if request.species_id is not None:
-        raise SearchValidationError("species filters are not available in this search")
+    if request.species_id is not None and request.species_id not in {
+        *context.candidate_ids,
+        "unknown",
+    }:
+        raise SearchValidationError(
+            "species ID must be in the selected candidate set or unknown"
+        )
     try:
         encoded = model.encode_texts((request.query,))
     except Exception as error:
@@ -89,7 +96,12 @@ def execute_search(
         raise SearchOperationalError("query encoder returned an invalid vector batch")
     query_vector = _validated_vector(encoded[0], "query")
 
-    crop_ids = tuple(candidate.result.crop_id for candidate in candidates)
+    filtered_candidates = tuple(
+        candidate
+        for candidate in candidates
+        if _matches_filters(candidate.result, request)
+    )
+    crop_ids = tuple(candidate.result.crop_id for candidate in filtered_candidates)
     if len(set(crop_ids)) != len(crop_ids):
         raise SearchValidationError(
             "search candidates contain duplicate crop identities"
@@ -98,7 +110,7 @@ def execute_search(
         raise SearchContextError("search candidate is outside the selected run")
 
     scored: list[tuple[float, str, SearchResult]] = []
-    for candidate in candidates:
+    for candidate in filtered_candidates:
         crop_vector = _validated_vector(candidate.embedding, "crop")
         similarity = _cosine_similarity(query_vector, crop_vector)
         if not math.isfinite(similarity):
@@ -122,6 +134,45 @@ def execute_search(
         results=results,
         warnings=_SEARCH_WARNINGS,
     )
+
+
+def parse_search_date(value: str) -> date:
+    """Parse one strict YYYY-MM-DD calendar date for search filters."""
+    if not isinstance(value, str) or not _DATE_PATTERN.fullmatch(value):
+        raise SearchValidationError("date must use YYYY-MM-DD format")
+    try:
+        return date.fromisoformat(value)
+    except ValueError as error:
+        raise SearchValidationError(
+            "date must be a valid YYYY-MM-DD calendar date"
+        ) from error
+
+
+def _matches_filters(result: SearchResult, request: SearchRequest) -> bool:
+    if request.start_date is not None or request.end_date is not None:
+        capture_date = _recorded_capture_date(result.capture_time)
+        if capture_date is None:
+            return False
+        if request.start_date is not None and capture_date < request.start_date:
+            return False
+        if request.end_date is not None and capture_date > request.end_date:
+            return False
+    if request.lighting is not None and result.lighting is not request.lighting:
+        return False
+    if request.species_id is not None:
+        assigned_species_id = result.assigned_species_id or "unknown"
+        if assigned_species_id != request.species_id:
+            return False
+    return True
+
+
+def _recorded_capture_date(value: str | None) -> date | None:
+    if not isinstance(value, str) or not value:
+        return None
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00")).date()
+    except ValueError:
+        return None
 
 
 def _validated_vector(value: object, label: str) -> Vector:

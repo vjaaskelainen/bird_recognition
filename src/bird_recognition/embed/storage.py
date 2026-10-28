@@ -39,6 +39,7 @@ from bird_recognition.embed.models import (
     SearchContextError,
     SearchOperationalError,
     SearchRepresentationError,
+    SearchRequest,
     SearchResult,
     SearchValidationError,
     Sha256,
@@ -668,10 +669,10 @@ class PgVectorStore:
             raise _storage_error(error) from None
 
     def load_search_collection(
-        self, run_id: UUID
+        self, request: SearchRequest
     ) -> tuple[SearchContext, tuple[SearchCandidate, ...]]:
         """Load one complete run context and its compatible crop vectors read-only."""
-        from bird_recognition.embed.search import SearchCandidate
+        from bird_recognition.embed.search import SearchCandidate, _matches_filters
 
         try:
             with psycopg.connect(
@@ -689,7 +690,7 @@ class PgVectorStore:
                     "USING(candidate_set_fingerprint) "
                     "JOIN bird_embed.embedding_model AS m USING(model_fingerprint) "
                     "WHERE r.run_id=%s",
-                    (run_id,),
+                    (request.run_id,),
                 ).fetchone()
                 if run is None:
                     raise SearchContextError("run selection was not found")
@@ -737,6 +738,13 @@ class PgVectorStore:
                     selected_crop_ids=(),
                     model_input_view=input_view,
                 )
+                if request.species_id is not None and request.species_id not in {
+                    *context.candidate_ids,
+                    "unknown",
+                }:
+                    raise SearchContextError(
+                        "species ID must be in the selected candidate set or unknown"
+                    )
                 rows = connection.execute(
                     "SELECT i.crop_id,i.resolved_input_locator,p.representation_id,"
                     "p.embedding,d.decision_id,d.config_fingerprint AS decision_config,"
@@ -759,7 +767,7 @@ class PgVectorStore:
                     "ON s.snapshot_id=p.snapshot_id AND s.crop_id=i.crop_id "
                     "WHERE i.run_id=%s AND i.status IN ('completed','skipped') "
                     "ORDER BY i.crop_id",
-                    (context.model_fingerprint, run_id),
+                    (context.model_fingerprint, request.run_id),
                 ).fetchall()
                 expected_count = run["completed_count"] + run["skipped_count"]
                 if len(rows) != expected_count:
@@ -771,15 +779,6 @@ class PgVectorStore:
                 context = replace(context, selected_crop_ids=crop_ids)
                 search_candidates = []
                 for row in rows:
-                    embedding = tuple(
-                        float(value) for value in row["embedding"].to_list()
-                    )
-                    try:
-                        _validate_embedding(embedding)
-                    except EmbedValidationError as error:
-                        raise SearchOperationalError(
-                            "stored crop representation is invalid"
-                        ) from error
                     result = SearchResult(
                         rank=1,
                         similarity=0.0,
@@ -808,6 +807,17 @@ class PgVectorStore:
                         frame_width=row["frame_width"],
                         frame_height=row["frame_height"],
                     )
+                    if not _matches_filters(result, request):
+                        continue
+                    embedding = tuple(
+                        float(value) for value in row["embedding"].to_list()
+                    )
+                    try:
+                        _validate_embedding(embedding)
+                    except EmbedValidationError as error:
+                        raise SearchOperationalError(
+                            "stored crop representation is invalid"
+                        ) from error
                     search_candidates.append(SearchCandidate(result, embedding))
                 return context, tuple(search_candidates)
         except SearchContextError, SearchOperationalError:
