@@ -1,10 +1,21 @@
 # Bird Recognition
 
-A trail-camera bird-footage search and question-answering project. The implemented
-workflows ingest local video, retain animal crops with provenance, optionally
-suggest species tags for crops, search indexed crops with text, and provide a
-diagnostic full-frame extractor. Grounded question answering (Ask/RAG) remains
-future work; there is no implemented answer-generation command.
+A tool for working through large collections of trail-camera footage. The camera's
+motion detection also triggers on wind-blown branches, so many clips contain no
+animal at all. The project has two goals:
+
+1. **Flag empty videos.** Detect whether a clip contains an animal so clips
+   without one can be set aside. This is a goal only: it is not yet planned or
+   implemented, and detection can miss animals, so "empty" would mean "likely
+   empty, to be reviewed".
+2. **Identify bird species.** Suggest species for the animals found in videos.
+
+Implemented today: video ingestion that detects animals and retains crops with
+provenance, optional species-tag suggestions for crops, text search over indexed
+crops, and a diagnostic full-frame extractor. Possible future extras include
+grounded question answering over the footage (Ask/RAG); there is no
+implemented answer-generation command.
+
 Species tags are candidate-relative suggestions, not verified biological
 identifications. See [Usage](docs/usage.md) for operational guidance and
 [Development](docs/development.md) for contributor setup and checks.

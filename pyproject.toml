@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "bird-recognition"
 version = "0.1.0"
-description = "Search and question-answering over trail-camera bird footage"
+description = "Detect animals and identify bird species in trail-camera footage"
 requires-python = ">=3.14"
 dependencies = [
     "av>=19.0.1,<20",
