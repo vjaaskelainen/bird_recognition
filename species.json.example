@@ -5,19 +5,19 @@
       "id": "sciurus_vulgaris",
       "kind": "species",
       "common_name": "Eurasian red squirrel",
-      "taxonomic_description": "Sciurus vulgaris; owner-verified local taxon"
+      "taxonomic_description": "Animalia Chordata Mammalia Rodentia Sciuridae Sciurus vulgaris"
     },
     {
       "id": "vulpes_vulpes",
       "kind": "species",
       "common_name": "Red fox",
-      "taxonomic_description": "Vulpes vulpes; owner-verified local taxon"
+      "taxonomic_description": "Animalia Chordata Mammalia Carnivora Canidae Vulpes vulpes"
     },
     {
       "id": "parus_major",
       "kind": "species",
       "common_name": "Great tit",
-      "taxonomic_description": "Parus major; owner-verified local taxon"
+      "taxonomic_description": "Animalia Chordata Aves Passeriformes Paridae Parus major"
     },
     {
       "id": "broad_bird",
