@@ -55,7 +55,10 @@ def test_context_policy_changes_crop_identity_without_overwriting_history(
     detections = [Detection(DetectionCategory.ANIMAL, 0.9, (0.1, 0.2, 0.4, 0.8))]
 
     _, tight_report = run_batch(
-        input_root, output_root, IngestSettings(), FakeDetector(detections)
+        input_root,
+        output_root,
+        IngestSettings(crop_policy="legacy-tight-v1"),
+        FakeDetector(detections),
     )
     original_paths = tuple((output_root / "crops").rglob("*.jpg"))
     original_bytes = tuple(path.read_bytes() for path in original_paths)

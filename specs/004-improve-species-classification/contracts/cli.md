@@ -12,12 +12,12 @@
 
 ## Ingestion crop preparation
 
-`ingest` gains opt-in/versioned crop preparation settings:
+`ingest` uses versioned crop preparation settings:
 
 | Option | Meaning |
 |---|---|
-| `--crop-context FRACTION` | Nonnegative finite proportional expansion on each side of the detector box, clipped to frame bounds; default 0 for legacy policy and 0.10 for `context-v1`. |
-| `--crop-policy VERSION` | Explicit crop generation policy version. |
+| `--crop-context FRACTION` | Nonnegative finite proportional expansion on each side of the detector box, clipped to frame bounds; defaults to 0.10 with `context-v1` and 0 with `legacy-tight-v1`. |
+| `--crop-policy VERSION` | Crop generation policy; defaults to `context-v1`. Use `legacy-tight-v1` for tight crops. |
 
 The effective options are part of canonical ingestion settings identity. Changed settings create distinct crop/run identities and paths; they never overwrite previous crop outputs. Preserve the rectangle (do not force square crops). Existing crop policy remains explicitly selectable as the historical baseline.
 
@@ -177,7 +177,6 @@ Example manifest shape (values and paths are illustrative):
 ## Report privacy and interpretation
 
 Quality, benchmark, and visit reports are external UTF-8 JSON files with schema version and exact input/setup identities. No report is automatically committed or written within the repository. Empty groups or zero metric denominators are `null`/unavailable; never present them as perfect. Insufficient reviewed counts are explicit. Synthetic tests prove code-path correctness only; biological quality claims require reviewed real examples not used to tune the evaluated setup.
-
 
 
 

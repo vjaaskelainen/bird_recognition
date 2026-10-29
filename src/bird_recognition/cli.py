@@ -274,13 +274,16 @@ def _build_parser() -> argparse.ArgumentParser:
         type=float,
         default=None,
         metavar="FRACTION",
-        help="proportional context expansion per side, clipped to frame bounds",
+        help=(
+            "context expansion per side (default 0.10 with context-v1), "
+            "clipped to frame bounds"
+        ),
     )
     ingest_parser.add_argument(
         "--crop-policy",
         choices=("legacy-tight-v1", "context-v1"),
-        default="legacy-tight-v1",
-        help="versioned crop geometry policy",
+        default="context-v1",
+        help="versioned crop geometry policy (use legacy-tight-v1 for tight crops)",
     )
     ingest_parser.add_argument(
         "--model",

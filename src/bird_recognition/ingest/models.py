@@ -53,7 +53,7 @@ class IngestSettings:
     animal_threshold: float = 0.2
     person_threshold: float = 0.2
     crop_context: float | None = None
-    crop_policy: str = "legacy-tight-v1"
+    crop_policy: str = "context-v1"
     extensions: tuple[str, ...] = (
         ".mp4",
         ".mov",

@@ -79,12 +79,11 @@
 
 ## Resolved questions
 
-No technical-context clarification remains. Initial implementation defaults are: legacy tight crop generation unless `context-v1` is selected (then 10% expansion per side); 32-pixel minimum crop width and height for new setups; legacy center-crop input view for historical setup reproduction and `fit-pad-v1` by default for new setups; minimum margin disabled unless explicitly configured; and `per-lighting=40` in the validation guide. These are reproducibility/quality-control settings, not empirically calibrated biological thresholds.
+No technical-context clarification remains. Initial implementation defaults are: `context-v1` crop generation with 10% expansion per side (select `legacy-tight-v1` for tight crops); 32-pixel minimum crop width and height for new setups; legacy center-crop input view for historical setup reproduction and `fit-pad-v1` by default for new setups; minimum margin disabled unless explicitly configured; and `per-lighting=40` in the validation guide. These are reproducibility/quality-control settings, not empirically calibrated biological thresholds.
 
 Reference decision rule is fixed: compare normalized embeddings by cosine similarity, inspect the top five references, retain only examples meeting the configured minimum similarity, require at least three retained references and a most-common species fraction meeting the configured minimum agreement, otherwise use zero-shot fallback. The reference path requires both thresholds explicitly; neither is presented as probability. Visit grouping is externally supplied and confident/owner-reviewed only; aggregate at least two compatible crop logits by arithmetic mean before applying threshold and margin. Benchmark commands require an explicit positive crop cap no greater than 500. Review sampling is deterministic and capped at 500 crops per lighting stratum. These fixed bounds can be changed only through a new versioned setup/algorithm, not silently.
 
-The legacy zero-shot setup remains available as a reproducible baseline. Reference assistance, crop-context expansion, margin rejection, visit aggregation, and alternative-model benchmarks are explicit opt-ins; new setups use the improved fit/pad input and minimum crop-size policy by default. All setup/quality-relevant values are validated and fingerprinted.
-
+The legacy zero-shot setup remains available as a reproducible baseline. Reference assistance, margin rejection, visit aggregation, and alternative-model benchmarks are explicit opt-ins; crop-context expansion uses the default `context-v1` policy. New setups use the improved fit/pad input and minimum crop-size policy by default. All setup/quality-relevant values are validated and fingerprinted.
 
 
 

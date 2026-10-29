@@ -171,7 +171,7 @@ def test_completed_ingest_reopens_with_complete_crop_provenance(
         assert 0 <= crop["box_left"] < crop["box_right"] <= crop["frame_width"]
         assert 0 <= crop["box_top"] < crop["box_bottom"] <= crop["frame_height"]
         expected_box = (
-            (8, 6, 24, 18) if crop["detection_confidence"] == 0.9 else (0, 0, 8, 6)
+            (6, 4, 26, 20) if crop["detection_confidence"] == 0.9 else (0, 0, 9, 7)
         )
         assert (
             crop["box_left"],
@@ -184,11 +184,10 @@ def test_completed_ingest_reopens_with_complete_crop_provenance(
             crop["detection_top"],
             crop["detection_right"],
             crop["detection_bottom"],
-        ) == tuple(
-            coordinate / dimension
-            for coordinate, dimension in zip(
-                expected_box, (32, 24, 32, 24), strict=True
-            )
+        ) == (
+            (0.25, 0.25, 0.75, 0.75)
+            if crop["detection_confidence"] == 0.9
+            else (0.0, 0.0, 0.25, 0.25)
         )
         with Image.open(image_path) as image:
             assert image.size == (

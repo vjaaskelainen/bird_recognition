@@ -30,10 +30,11 @@ extensions are `.mp4`, `.mov`, `.m4v`, `.mkv`, `.avi`, `.mpeg`, and `.mpg`.
 Sampling defaults to one second; animal and person confidence thresholds default
 to `0.2` and qualify inclusively.
 
-Crop context is opt-in: `--crop-policy context-v1` defaults to 10% expansion on
-each side, clipped to the frame; `--crop-context` overrides the fraction. The
-legacy policy defaults to no expansion. Changed effective crop settings create
-new crop identities and preserve historical files and manifest rows.
+Crop context defaults to `context-v1`, which expands each detector box by 10%
+on each side, clipped to the frame; `--crop-context` overrides the fraction.
+Use `--crop-policy legacy-tight-v1` for no expansion. Changed effective crop
+settings create new crop identities and preserve historical files and manifest
+rows.
 
 ```powershell
 .\.venv\Scripts\uv.exe run bird-recognition ingest `
@@ -337,4 +338,3 @@ Report the hit rate as
 denominator, selected collection/context, target-selection method, and failure cases.
 Keep footage, crops, labels, and generated reports outside the repository. No measured
 text-search quality is asserted by this guide.
-

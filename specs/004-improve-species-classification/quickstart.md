@@ -72,7 +72,7 @@ Expected: report identifies candidate and prompt versions, displays day/night/un
 
 ## 3. Compare crop preparation without overwriting history
 
-Re-ingest the same approved video selection with a changed, explicit crop-context/policy version into the same external ingestion output. The changed effective settings must create new crop files/IDs/manifest rows and preserve old results. Index the new manifest using the same model and candidate/prompt setup, and explicitly choose the fit/pad image view; then compare it against the original using the `case_id` mapping.
+Re-ingest the same approved video selection with the default `context-v1` crop policy into the same external ingestion output. The changed effective settings must create new crop files/IDs/manifest rows and preserve old results. Index the new manifest using the same model and candidate/prompt setup, and explicitly choose the fit/pad image view; then compare it against the original using the `case_id` mapping.
 
 ```powershell
 .\.venv\Scripts\uv.exe run bird-recognition ingest `
@@ -80,7 +80,7 @@ Re-ingest the same approved video selection with a changed, explicit crop-contex
   --output $ingested `
   --model 'D:\models\MDV6-mit-yolov9-c.ckpt' `
   --model-config 'D:\models\config_v9s.yaml' `
-  --crop-context 0.10 --crop-policy context-v1
+  --crop-policy context-v1
 .\.venv\Scripts\uv.exe run bird-recognition index `
   --manifest "$ingested\manifest.sqlite3" `
   --species-list 'D:\bird-config\species-local-v2.json' `
@@ -130,7 +130,6 @@ Expected: no model download, network access, private data, or database requireme
 Against an explicitly approved disposable local database only, run integration tests using `BIRD_RECOGNITION_TEST_DATABASE_URL` as documented in `AGENTS.md`. Verify migrations upgrade an existing schema without deleting old decisions, database constraints match pure validation, and historical records remain inspectable. A skipped integration suite is not database evidence.
 
 Write all comparison/benchmark/visit reports to an existing external folder. Empty metric denominators are unavailable/null; publication readiness is only a minimum-sample marker, never an accuracy guarantee. Document measured real-label results and observed failure cases separately from offline correctness.
-
 
 
 

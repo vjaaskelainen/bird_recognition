@@ -62,3 +62,4 @@ def test_cli_persists_crop_provenance_and_saved_region(
             assert image.size == (right - left, bottom - top)
         assert 0 <= left < right <= width
         assert 0 <= top < bottom <= height
+        assert (left, top, right, bottom) == (6, 6, 26, 23)

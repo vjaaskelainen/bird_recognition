@@ -147,6 +147,29 @@ def test_ingest_cli_parses_context_crop_policy() -> None:
     assert arguments.crop_policy == "context-v1"
 
 
+def test_ingest_cli_defaults_to_context_and_accepts_legacy_policy() -> None:
+    parser = _build_parser()
+    default_arguments = parser.parse_args(
+        ["ingest", "--input", "videos", "--output", "crops"]
+    )
+    legacy_arguments = parser.parse_args(
+        [
+            "ingest",
+            "--input",
+            "videos",
+            "--output",
+            "crops",
+            "--crop-policy",
+            "legacy-tight-v1",
+        ]
+    )
+
+    assert default_arguments.crop_context is None
+    assert default_arguments.crop_policy == "context-v1"
+    assert legacy_arguments.crop_context is None
+    assert legacy_arguments.crop_policy == "legacy-tight-v1"
+
+
 def test_ingest_cli_rejects_context_with_legacy_crop_policy(
     tmp_path: Path,
 ) -> None:
@@ -163,6 +186,8 @@ def test_ingest_cli_rejects_context_with_legacy_crop_policy(
             str(output_root),
             "--crop-context",
             "0.1",
+            "--crop-policy",
+            "legacy-tight-v1",
         ],
         detector=FakeDetector(),
     )
@@ -330,7 +355,7 @@ def test_ingest_cli_reopens_persisted_crop_provenance(
             row["box_top"],
             row["box_right"],
             row["box_bottom"],
-        ) == (8, 6, 24, 18)
+        ) == (6, 4, 26, 20)
         image_path = (output_root / row["image_path"]).resolve()
         assert output_root.resolve() in image_path.parents
         assert hashlib.sha256(image_path.read_bytes()).hexdigest() == row["crop_sha256"]

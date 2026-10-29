@@ -92,6 +92,16 @@ def test_settings_record_lighting_evidence_thresholds() -> None:
     assert dict(settings.lighting_settings)["day_min_luma"] == 0.28
 
 
+def test_settings_default_to_context_crop_and_support_legacy_policy() -> None:
+    default_settings = IngestSettings()
+    legacy_settings = IngestSettings(crop_policy="legacy-tight-v1")
+
+    assert default_settings.crop_policy == "context-v1"
+    assert default_settings.crop_context == 0.1
+    assert legacy_settings.crop_policy == "legacy-tight-v1"
+    assert legacy_settings.crop_context == 0.0
+
+
 def test_capture_time_represents_unknown_time_and_timezone_as_null() -> None:
     assert CaptureTime() == CaptureTime(local_time=None, timezone=None)
 
