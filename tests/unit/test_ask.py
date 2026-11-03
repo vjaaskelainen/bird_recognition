@@ -1,13 +1,17 @@
 from __future__ import annotations
 
+import json
+import sys
 from dataclasses import replace
 from datetime import date, datetime
 from pathlib import Path
+from types import SimpleNamespace
 from uuid import UUID
 
 import pytest
 
 from bird_recognition.ask import (
+    AskOperationalError,
     AskOutcome,
     AskOutcomeStatus,
     AskRequest,
@@ -15,10 +19,14 @@ from bird_recognition.ask import (
     Citation,
     EvidenceItem,
     GeneratedClaim,
+    OpenAIAnswerClient,
     SupportedClaim,
+    build_answer_input,
+    execute_ask,
 )
 from bird_recognition.embed.config import AskServiceConfiguration
-from bird_recognition.embed.models import Lighting
+from bird_recognition.embed.models import Lighting, SearchContext, SearchResult
+from bird_recognition.embed.search import SearchCandidate
 
 
 def _request() -> AskRequest:
@@ -50,7 +58,7 @@ def _evidence() -> EvidenceItem:
         detection_confidence=0.8,
         similarity=0.7,
         image_status="available",
-        image_bytes=b"crop-image",
+        image_bytes=b"\x89PNG\r\n\x1a\ncrop-image",
     )
 
 
@@ -172,3 +180,266 @@ def test_ask_outcome_rejects_supported_claim_without_citations() -> None:
             request=_request(),
             evidence=(_evidence(),),
         )
+
+
+def _search_context(crop_ids: tuple[str, ...] = ("crop-1",)) -> SearchContext:
+    return SearchContext(
+        run_id=_request().run_id,
+        model_fingerprint="a" * 64,
+        config_fingerprint="b" * 64,
+        candidate_set_fingerprint="c" * 64,
+        candidate_ids=("bird",),
+        selected_crop_ids=crop_ids,
+        model_input_view="fit-pad-v1",
+    )
+
+
+def _search_result(crop_path: Path) -> SearchResult:
+    return SearchResult(
+        rank=1,
+        similarity=0.75,
+        crop_id="crop-1",
+        snapshot_id="d" * 64,
+        representation_id=UUID("00000000-0000-0000-0000-000000000002"),
+        decision_id=UUID("00000000-0000-0000-0000-000000000003"),
+        assigned_species_id="bird",
+        species_confidence=0.8,
+        crop_path=crop_path,
+        image_status="available",
+        source_id="source-1",
+        source_video="camera.mp4",
+        source_original_path="recordings/camera.mp4",
+        frame_number=10,
+        elapsed_seconds=1.5,
+        capture_time="2026-10-25T22:00:00",
+        capture_timezone="Europe/Helsinki",
+        lighting=Lighting.NIGHT,
+        detection_id="detection-1",
+        detection_category="animal",
+        detection_confidence=0.9,
+        detection_box_normalized=(0.1, 0.2, 0.5, 0.6),
+        crop_box_pixels=(10, 20, 50, 60),
+        frame_width=100,
+        frame_height=100,
+        config_fingerprint="b" * 64,
+    )
+
+
+class _AnswerClient:
+    def __init__(self, response: str) -> None:
+        self.response = response
+        self.calls: list[tuple[str, tuple[EvidenceItem, ...]]] = []
+
+    def generate(self, question: str, evidence: tuple[EvidenceItem, ...]) -> str:
+        self.calls.append((question, evidence))
+        return self.response
+
+
+def test_build_answer_input_includes_question_metadata_and_selected_image() -> None:
+    messages = build_answer_input(_request(), (_evidence(),))
+    user_content = messages[1]["content"]
+
+    assert messages[0]["role"] == "system"
+    assert (
+        "Answer only from the supplied image pixels and metadata"
+        in messages[0]["content"]
+    )
+    assert isinstance(user_content, list)
+    assert user_content[0]["type"] == "input_text"
+    assert "Which bird appears?" in user_content[0]["text"]
+    assert user_content[1]["type"] == "input_text"
+    assert '"evidence_index": 0' in user_content[1]["text"]
+    assert "camera.mp4" in user_content[1]["text"]
+    assert "frame_number" in user_content[1]["text"]
+    assert user_content[2]["type"] == "input_image"
+    assert user_content[2]["image_url"].startswith("data:image/")
+
+
+def test_openai_adapter_uses_strict_schema_and_finite_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+
+    class Responses:
+        def create(self, **kwargs: object) -> SimpleNamespace:
+            captured["request"] = kwargs
+            return SimpleNamespace(output_text='{"structured":true}')
+
+    class FakeOpenAI:
+        def __init__(self, *, api_key: str, timeout: float, max_retries: int) -> None:
+            captured["api_key"] = api_key
+            captured["timeout"] = timeout
+            captured["max_retries"] = max_retries
+            self.responses = Responses()
+
+    monkeypatch.setitem(sys.modules, "openai", SimpleNamespace(OpenAI=FakeOpenAI))
+    client = OpenAIAnswerClient(_request().service_config)
+
+    assert client.generate("Which bird appears?", (_evidence(),)) == (
+        '{"structured":true}'
+    )
+    request = captured["request"]
+    assert captured["api_key"] == "test-key"
+    assert captured["timeout"] == 60.0
+    assert captured["max_retries"] == 0
+    assert request["model"] == "gpt-4o-mini"
+    assert request["timeout"] == 60.0
+    assert request["text"]["format"]["type"] == "json_schema"
+    assert request["text"]["format"]["strict"] is True
+
+
+def test_openai_adapter_sanitizes_service_errors(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class Responses:
+        def create(self, **kwargs: object) -> SimpleNamespace:
+            raise RuntimeError("credential leaked: test-key")
+
+    class FakeOpenAI:
+        def __init__(self, **_: object) -> None:
+            self.responses = Responses()
+
+    monkeypatch.setitem(sys.modules, "openai", SimpleNamespace(OpenAI=FakeOpenAI))
+
+    with pytest.raises(
+        AskOperationalError, match="answer service request failed"
+    ) as exc:
+        OpenAIAnswerClient(_request().service_config).generate(
+            "Which bird appears?", (_evidence(),)
+        )
+
+    assert "test-key" not in str(exc.value)
+
+
+def test_execute_ask_resolves_valid_claim_indices_to_selected_provenance(
+    tmp_path: Path,
+) -> None:
+    request = replace(_request(), question="What appears in the crop?")
+    context = _search_context()
+    crop_path = tmp_path / "crop.png"
+    crop_path.write_bytes(b"\x89PNG\r\n\x1a\ncrop-image")
+    result = _search_result(crop_path)
+    candidate = SearchCandidate(result=result, embedding=(1.0,) + (0.0,) * 511)
+    model = SimpleNamespace(
+        identity=SimpleNamespace(model_fingerprint=context.model_fingerprint),
+        encode_texts=lambda _: ((1.0,) + (0.0,) * 511,),
+    )
+    store = SimpleNamespace(load_search_collection=lambda _: (context, (candidate,)))
+    client = _AnswerClient(
+        json.dumps(
+            {
+                "sufficient_evidence": True,
+                "answer": "A bird appears.",
+                "insufficient_reason": None,
+                "claims": [
+                    {"text": "A bird appears.", "evidence_indices": [0]},
+                    {
+                        "text": "The crop was recorded at night.",
+                        "evidence_indices": [0],
+                    },
+                ],
+            }
+        )
+    )
+
+    outcome = execute_ask(request, model, store, client)
+
+    assert outcome.status is AskOutcomeStatus.SUPPORTED
+    assert outcome.context is context
+    assert len(outcome.claims) == 2
+    citation = outcome.claims[0].citations[0]
+    assert citation == Citation(
+        evidence_index=0,
+        crop_id="crop-1",
+        source_video="camera.mp4",
+        frame_number=10,
+        capture_time="2026-10-25T22:00:00",
+    )
+    assert outcome.evidence[0].image_bytes is not None
+    assert len(client.calls) == 1
+
+
+def test_execute_ask_discards_invalid_indices_and_downgrades_uncited_claims(
+    tmp_path: Path,
+) -> None:
+    request = _request()
+    context = _search_context()
+    crop_path = tmp_path / "crop.png"
+    crop_path.write_bytes(b"\x89PNG\r\n\x1a\ncrop-image")
+    result = _search_result(crop_path)
+    candidate = SearchCandidate(result=result, embedding=(1.0,) + (0.0,) * 511)
+    model = SimpleNamespace(
+        identity=SimpleNamespace(model_fingerprint=context.model_fingerprint),
+        encode_texts=lambda _: ((1.0,) + (0.0,) * 511,),
+    )
+    store = SimpleNamespace(load_search_collection=lambda _: (context, (candidate,)))
+    client = _AnswerClient(
+        json.dumps(
+            {
+                "sufficient_evidence": True,
+                "answer": "Two claims.",
+                "insufficient_reason": None,
+                "claims": [
+                    {"text": "Supported.", "evidence_indices": [0, 7]},
+                    {"text": "Unsupported.", "evidence_indices": [99]},
+                ],
+            }
+        )
+    )
+
+    outcome = execute_ask(request, model, store, client)
+
+    assert outcome.status is AskOutcomeStatus.INSUFFICIENT_EVIDENCE
+    assert outcome.claims == ()
+    assert outcome.reason
+
+
+def test_execute_ask_uses_only_valid_indices_from_a_mixed_citation_list(
+    tmp_path: Path,
+) -> None:
+    request = _request()
+    context = _search_context()
+    crop_path = tmp_path / "crop.png"
+    crop_path.write_bytes(b"\x89PNG\r\n\x1a\ncrop-image")
+    candidate = SearchCandidate(
+        result=_search_result(crop_path),
+        embedding=(1.0,) + (0.0,) * 511,
+    )
+    model = SimpleNamespace(
+        identity=SimpleNamespace(model_fingerprint=context.model_fingerprint),
+        encode_texts=lambda _: ((1.0,) + (0.0,) * 511,),
+    )
+    store = SimpleNamespace(load_search_collection=lambda _: (context, (candidate,)))
+    client = _AnswerClient(
+        json.dumps(
+            {
+                "sufficient_evidence": True,
+                "answer": "A bird appears.",
+                "insufficient_reason": None,
+                "claims": [
+                    {"text": "A bird appears.", "evidence_indices": [0, -1, 8]},
+                ],
+            }
+        )
+    )
+
+    outcome = execute_ask(request, model, store, client)
+
+    assert outcome.status is AskOutcomeStatus.SUPPORTED
+    assert [citation.evidence_index for citation in outcome.claims[0].citations] == [0]
+
+
+def test_execute_ask_does_not_call_answer_client_when_search_is_empty() -> None:
+    request = _request()
+    context = _search_context(())
+    model = SimpleNamespace(
+        identity=SimpleNamespace(model_fingerprint=context.model_fingerprint),
+        encode_texts=lambda _: ((1.0,) + (0.0,) * 511,),
+    )
+    store = SimpleNamespace(load_search_collection=lambda _: (context, ()))
+    client = _AnswerClient("{}")
+
+    outcome = execute_ask(request, model, store, client)
+
+    assert outcome.status is AskOutcomeStatus.INSUFFICIENT_EVIDENCE
+    assert client.calls == []

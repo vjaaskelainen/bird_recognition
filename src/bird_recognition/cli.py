@@ -436,6 +436,15 @@ def _build_parser() -> argparse.ArgumentParser:
     search_parser.add_argument("--database-url")
     search_parser.add_argument("--model-dir", type=Path)
     search_parser.add_argument("--json", action="store_true")
+    ask_parser = commands.add_parser(
+        "ask", help="ask a question grounded in one indexed run"
+    )
+    ask_parser.add_argument("question", help="nonblank question about the footage")
+    ask_parser.add_argument("--run-id", required=True)
+    ask_parser.add_argument("--limit", type=int, default=5)
+    ask_parser.add_argument("--database-url")
+    ask_parser.add_argument("--model-dir", type=Path)
+    ask_parser.add_argument("--json", action="store_true")
     return parser
 
 
@@ -494,6 +503,7 @@ def main(argv: list[str] | None = None, detector: Detector | None = None) -> int
         "benchmark-species",
         "aggregate-visits",
         "search",
+        "ask",
     }:
         if arguments.command == "compare-species" and len(arguments.run_id) < 2:
             parser.error("compare-species requires at least two --run-id values")
@@ -604,6 +614,7 @@ def _dispatch_embed_command(arguments: argparse.Namespace) -> int:
         Lighting,
         PreflightError,
         RunStatus,
+        SearchValidationError,
         StorageError,
     )
     from bird_recognition.embed.scoring import (
@@ -627,6 +638,52 @@ def _dispatch_embed_command(arguments: argparse.Namespace) -> int:
             dotenv_environment=dotenv_environment,
         )
         arguments.database_url = resolved["database_url"]
+        if arguments.command == "ask":
+            from bird_recognition.ask import (
+                AskRequest,
+                execute_ask,
+            )
+            from bird_recognition.embed.bioclip import load_bioclip
+            from bird_recognition.embed.config import resolve_ask_configuration
+            from bird_recognition.embed.models import SearchRequest
+
+            service_configuration = resolve_ask_configuration(
+                process_environment=os.environ,
+                dotenv_environment=dotenv_environment,
+            )
+            request = AskRequest(
+                question=arguments.question,
+                run_id=UUID(arguments.run_id),
+                database_url=arguments.database_url,
+                model_dir=Path(resolved["model_dir"]),
+                service_config=service_configuration,
+                evidence_limit=arguments.limit,
+                output_format="json" if arguments.json else "text",
+            )
+            search_request = SearchRequest(
+                query=request.question,
+                run_id=request.run_id,
+                limit=request.evidence_limit,
+            )
+            with closing(PgVectorStore(arguments.database_url)) as store:
+                try:
+                    store.preflight(read_only=True)
+                except StorageError as error:
+                    raise PreflightError(str(error)) from None
+                context, candidates = store.load_search_collection(search_request)
+                model = load_bioclip(
+                    Path(resolved["model_dir"]),
+                    input_view=context.model_input_view,
+                )
+                outcome = execute_ask(
+                    request,
+                    model,
+                    store,
+                    context=context,
+                    candidates=candidates,
+                )
+            _render_ask_outcome(outcome, json_output=arguments.json)
+            return 0
         if arguments.command == "search":
             from bird_recognition.embed.bioclip import load_bioclip
             from bird_recognition.embed.models import SearchRequest
@@ -969,6 +1026,19 @@ def _dispatch_embed_command(arguments: argparse.Namespace) -> int:
         return 0
     except (EmbedValidationError, ValueError, OSError) as error:
         if arguments.json:
+            if arguments.command == "ask":
+                print(
+                    json.dumps(
+                        {
+                            "schema_version": 1,
+                            "status": "input_error",
+                            "code": "invalid_request",
+                            "message": sanitize_error(str(error)),
+                        },
+                        sort_keys=True,
+                    )
+                )
+                return 2
             code = (
                 _search_failure_code(error)
                 if arguments.command == "search"
@@ -984,9 +1054,37 @@ def _dispatch_embed_command(arguments: argparse.Namespace) -> int:
                 failure["run_id"] = None
             print(json.dumps(failure, sort_keys=True))
         else:
-            print(f"Preflight error: {sanitize_error(str(error))}", file=sys.stderr)
+            label = (
+                "Ask input error" if arguments.command == "ask" else "Preflight error"
+            )
+            print(f"{label}: {sanitize_error(str(error))}", file=sys.stderr)
         return 2
     except EmbedError as error:
+        if arguments.command == "ask":
+            from bird_recognition.ask import AskOperationalError
+
+            input_failure = not isinstance(error, AskOperationalError) and isinstance(
+                error, (PreflightError, SearchValidationError)
+            )
+            status = "input_error" if input_failure else "operational_failure"
+            message = sanitize_error(str(error))
+            if arguments.json:
+                failure: dict[str, object] = {
+                    "schema_version": 1,
+                    "status": status,
+                    "message": message,
+                }
+                if input_failure:
+                    failure["code"] = "invalid_selection"
+                print(json.dumps(failure, sort_keys=True))
+            else:
+                print(
+                    f"Ask input error: {message}"
+                    if input_failure
+                    else f"Ask operation failed: {message}",
+                    file=sys.stderr,
+                )
+            return 2 if input_failure else 1
         if arguments.command == "search":
             is_preflight = isinstance(error, PreflightError)
             if arguments.json:
@@ -1174,6 +1272,106 @@ def _search_payload(outcome: object) -> dict[str, object]:
             for result in outcome.results
         ],
     }
+
+
+def _ask_payload(outcome: object) -> dict[str, object]:
+    request = outcome.request
+    context = outcome.context
+    payload: dict[str, object] = {
+        "schema_version": 1,
+        "status": (
+            "answered"
+            if outcome.status.value == "supported"
+            else "insufficient_evidence"
+        ),
+        "question": request.question,
+        "filters": {
+            "start_date": None,
+            "end_date": None,
+            "lighting": None,
+            "species_id": None,
+        },
+        "requested_limit": request.evidence_limit,
+        "evidence_count": len(outcome.evidence),
+        "context": {
+            "run_id": str(request.run_id),
+            "model_fingerprint": (
+                context.model_fingerprint if context is not None else None
+            ),
+            "config_fingerprint": (
+                context.config_fingerprint if context is not None else None
+            ),
+            "candidate_set_fingerprint": (
+                context.candidate_set_fingerprint if context is not None else None
+            ),
+        },
+        "claims": [
+            {
+                "text": claim.text,
+                "citations": [
+                    {
+                        "evidence_index": citation.evidence_index,
+                        "crop_id": citation.crop_id,
+                        "source_video": citation.source_video,
+                        "frame_number": citation.frame_number,
+                        "capture_time": citation.capture_time,
+                    }
+                    for citation in claim.citations
+                ],
+            }
+            for claim in outcome.claims
+        ],
+        "evidence": [
+            {
+                "evidence_index": item.evidence_index,
+                "crop_id": item.crop_id,
+                "image_status": item.image_status,
+                "source_video": item.source_video,
+                "frame_number": item.frame_number,
+                "capture_time": item.capture_time,
+                "capture_timezone": item.capture_timezone,
+                "similarity": item.similarity,
+                "species": {
+                    "id": item.species_id or "unknown",
+                    "confidence": item.species_confidence,
+                },
+                "detection_confidence": item.detection_confidence,
+            }
+            for item in outcome.evidence
+        ],
+    }
+    if outcome.reason is not None:
+        payload["reason"] = outcome.reason
+    return payload
+
+
+def _render_ask_outcome(outcome: object, *, json_output: bool) -> None:
+    if json_output:
+        print(
+            json.dumps(
+                _ask_payload(outcome),
+                ensure_ascii=False,
+                sort_keys=True,
+                default=str,
+            )
+        )
+        return
+    print(f"Question: {outcome.request.question}")
+    print(f"Run: {outcome.request.run_id}")
+    print(f"Evidence items: {len(outcome.evidence)}")
+    if outcome.status.value != "supported":
+        print(f"Insufficient evidence: {outcome.reason}")
+        return
+    print("Answer:")
+    for claim_index, claim in enumerate(outcome.claims, start=1):
+        print(f"{claim_index}. {claim.text}")
+        for citation in claim.citations:
+            capture_time = citation.capture_time or "unknown"
+            print(
+                f"   Evidence: crop {citation.crop_id}; "
+                f"source {citation.source_video}; frame {citation.frame_number}; "
+                f"capture time {capture_time}"
+            )
 
 
 def _render_search_summary(outcome: object) -> None:

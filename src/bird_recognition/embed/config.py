@@ -478,6 +478,7 @@ def resolve_embed_configuration(
         "benchmark-species": ("database_url",),
         "aggregate-visits": ("database_url",),
         "search": ("database_url", "model_dir"),
+        "ask": ("database_url", "model_dir"),
     }
     if command not in required_by_command:
         raise EmbedValidationError("unsupported embedding command")

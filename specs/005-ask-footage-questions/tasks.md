@@ -41,16 +41,16 @@ description: "Task list for Ask Questions About Footage"
 
 ### Tests for User Story 1
 
-- [ ] T005 [P] [US1] Add offline tests for prompt inputs, structured claims, valid and invalid evidence indices, and authoritative citation resolution in `tests/unit/test_ask.py`
-- [ ] T006 [P] [US1] Add CLI parsing and supported-answer output tests for the Ask command in `tests/unit/test_cli_ask.py`
+- [X] T005 [P] [US1] Add offline tests for prompt inputs, structured claims, valid and invalid evidence indices, and authoritative citation resolution in `tests/unit/test_ask.py`
+- [X] T006 [P] [US1] Add CLI parsing and supported-answer output tests for the Ask command in `tests/unit/test_cli_ask.py`
 
 ### Implementation for User Story 1
 
-- [ ] T007 [US1] Implement deterministic search-backed evidence selection, selected context retention, and available-crop byte loading in `src/bird_recognition/ask.py`
-- [ ] T008 [US1] Implement the OpenAI Responses API adapter with strict structured output, base64 selected-crop data URLs, finite timeout, and sanitized failures in `src/bird_recognition/ask.py`
-- [ ] T009 [US1] Implement evidence-only prompt rules, response-shape validation, request-local citation resolution, and supported/unsupported claim handling in `src/bird_recognition/ask.py`
-- [ ] T010 [US1] Register the `ask` parser options and dispatch through existing read-only search/storage configuration in `src/bird_recognition/cli.py`
-- [ ] T011 [US1] Render supported answers and evidence provenance as human-readable output and schema-version-1 JSON in `src/bird_recognition/cli.py`
+- [X] T007 [US1] Implement deterministic search-backed evidence selection, selected context retention, and available-crop byte loading in `src/bird_recognition/ask.py`
+- [X] T008 [US1] Implement the OpenAI Responses API adapter with strict structured output, base64 selected-crop data URLs, finite timeout, and sanitized failures in `src/bird_recognition/ask.py`
+- [X] T009 [US1] Implement evidence-only prompt rules, response-shape validation, request-local citation resolution, and supported/unsupported claim handling in `src/bird_recognition/ask.py`
+- [X] T010 [US1] Register the `ask` parser options and dispatch through existing read-only search/storage configuration in `src/bird_recognition/cli.py`
+- [X] T011 [US1] Render supported answers and evidence provenance as human-readable output and schema-version-1 JSON in `src/bird_recognition/cli.py`
 
 **Checkpoint**: User Story 1 returns a supported answer only when every displayed claim has valid citations to supplied evidence.
 
@@ -124,8 +124,8 @@ description: "Task list for Ask Questions About Footage"
 
 **Purpose**: Align the feature's acceptance guide with the implemented command and validate the complete increment.
 
-- [ ] T028 [P] Update offline and optional local acceptance instructions for the implemented command and outputs in `specs/005-ask-footage-questions/quickstart.md`
-- [ ] T029 Run focused Ask unit tests and the configured Ruff lint and format checks; fix any Ask-related failures in `tests/unit/test_ask.py`, `tests/unit/test_cli_ask.py`, and `src/bird_recognition/`
+- [X] T028 [P] Update offline and optional local acceptance instructions for the implemented command and outputs in `specs/005-ask-footage-questions/quickstart.md`
+- [X] T029 Run focused Ask unit tests and the configured Ruff lint and format checks; fix any Ask-related failures in `tests/unit/test_ask.py`, `tests/unit/test_cli_ask.py`, and `src/bird_recognition/`
 
 ---
 

@@ -1,6 +1,9 @@
 # CLI Contract: Ask Questions About Footage
 
-**Status**: Planned local read-only `ask` subcommand. See
+**Status**: User Story 1 is implemented. The date, lighting, and species filters
+in this end-state contract are planned for later stories. The current command
+accepts `QUESTION`, `--run-id`, `--limit`, `--database-url`, `--model-dir`, and
+`--json`. See
 [data model](../data-model.md) for request/outcome semantics and
 [quickstart](../quickstart.md) for validation.
 

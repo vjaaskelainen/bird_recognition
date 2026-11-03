@@ -2,26 +2,39 @@
 
 from __future__ import annotations
 
+import base64
+import json
 import math
 import re
 from dataclasses import dataclass, field
 from datetime import date
 from enum import StrEnum
 from pathlib import Path
-from typing import Literal
+from typing import Literal, Protocol
 from uuid import UUID
 
 from bird_recognition.embed.config import (
     AskServiceConfiguration,
     validate_local_database_url,
 )
-from bird_recognition.embed.models import EmbedValidationError, Lighting
+from bird_recognition.embed.models import (
+    EmbedError,
+    EmbedValidationError,
+    Lighting,
+    SearchContext,
+    SearchRequest,
+)
+from bird_recognition.embed.search import SearchCandidate, SearchModel, SearchStore
 
 _SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 
 
 class AskValidationError(ValueError):
     """Raised when a transient Ask request, evidence item, or outcome is invalid."""
+
+
+class AskOperationalError(EmbedError):
+    """Raised when search or answer generation cannot complete safely."""
 
 
 class AskOutcomeStatus(StrEnum):
@@ -264,12 +277,21 @@ class AskOutcome:
     evidence: tuple[EvidenceItem, ...] = ()
     claims: tuple[SupportedClaim, ...] = ()
     reason: str | None = None
+    context: SearchContext | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.status, AskOutcomeStatus):
             raise AskValidationError("outcome status is invalid")
         if self.request is not None and not isinstance(self.request, AskRequest):
             raise AskValidationError("outcome request is invalid")
+        if self.context is not None and not isinstance(self.context, SearchContext):
+            raise AskValidationError("outcome search context is invalid")
+        if (
+            self.context is not None
+            and self.request is not None
+            and self.context.run_id != self.request.run_id
+        ):
+            raise AskValidationError("outcome context does not match its request")
         if not isinstance(self.evidence, tuple) or any(
             not isinstance(item, EvidenceItem) for item in self.evidence
         ):
@@ -317,3 +339,321 @@ class AskOutcome:
                 raise AskValidationError(
                     "insufficient-evidence outcome requires its request"
                 )
+
+
+class AskAnswerClient(Protocol):
+    """Boundary for one structured answer-service request."""
+
+    def generate(self, question: str, evidence: tuple[EvidenceItem, ...]) -> str:
+        """Return the service's structured JSON response."""
+
+
+class OpenAIAnswerClient:
+    """Structured vision answer adapter for the OpenAI Responses API."""
+
+    def __init__(self, configuration: AskServiceConfiguration) -> None:
+        self._configuration = configuration
+
+    def generate(self, question: str, evidence: tuple[EvidenceItem, ...]) -> str:
+        from openai import OpenAI
+
+        try:
+            client = OpenAI(
+                api_key=self._configuration.api_key,
+                timeout=self._configuration.timeout_seconds,
+                max_retries=0,
+            )
+            response = client.responses.create(
+                model=self._configuration.model,
+                input=build_answer_input_values(question, evidence),
+                text={
+                    "format": {
+                        "type": "json_schema",
+                        "name": "grounded_footage_answer",
+                        "strict": True,
+                        "schema": _ANSWER_SCHEMA,
+                    }
+                },
+                timeout=self._configuration.timeout_seconds,
+            )
+            output = response.output_text
+        except AskOperationalError:
+            raise
+        except Exception:
+            raise AskOperationalError("answer service request failed") from None
+        if not isinstance(output, str) or not output.strip():
+            raise AskOperationalError("answer service returned no structured output")
+        return output
+
+
+_SYSTEM_PROMPT = (
+    "Answer only from the supplied image pixels and metadata. Do not use general "
+    "knowledge to fill gaps. Return distinct checkable claims and cite every claim "
+    "with one or more supplied evidence indices. If the evidence does not support "
+    "an answer, state that it is insufficient. A species decision, confidence, or "
+    "similarity is not proof of identity or occurrence. Do not describe metadata-only "
+    "evidence as visually inspected."
+)
+_ANSWER_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "sufficient_evidence": {"type": "boolean"},
+        "answer": {"type": ["string", "null"]},
+        "insufficient_reason": {"type": ["string", "null"]},
+        "claims": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "text": {"type": "string"},
+                    "evidence_indices": {
+                        "type": "array",
+                        "items": {"type": "integer"},
+                    },
+                },
+                "required": ["text", "evidence_indices"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    "required": [
+        "sufficient_evidence",
+        "answer",
+        "insufficient_reason",
+        "claims",
+    ],
+    "additionalProperties": False,
+}
+
+
+def build_answer_input(
+    request: AskRequest, evidence: tuple[EvidenceItem, ...]
+) -> list[dict[str, object]]:
+    """Build the system and user messages sent for one selected evidence set."""
+    return build_answer_input_values(request.question, evidence)
+
+
+def build_answer_input_values(
+    question: str, evidence: tuple[EvidenceItem, ...]
+) -> list[dict[str, object]]:
+    """Build Responses API input messages without adding unselected local data."""
+    content: list[dict[str, object]] = [
+        {
+            "type": "input_text",
+            "text": f"Question: {question}",
+        }
+    ]
+    for item in evidence:
+        metadata = {
+            "evidence_index": item.evidence_index,
+            "crop_id": item.crop_id,
+            "source_video": item.source_video,
+            "frame_number": item.frame_number,
+            "elapsed_seconds": item.elapsed_seconds,
+            "capture_time": item.capture_time,
+            "capture_timezone": item.capture_timezone,
+            "lighting": item.lighting.value,
+            "species_id": item.species_id or "unknown",
+            "species_confidence": item.species_confidence,
+            "detection_confidence": item.detection_confidence,
+            "similarity": item.similarity,
+            "image_status": item.image_status,
+        }
+        content.append(
+            {
+                "type": "input_text",
+                "text": (
+                    "Selected evidence metadata (indices are request-local):\n"
+                    f"{json.dumps(metadata, ensure_ascii=False, sort_keys=True)}"
+                ),
+            }
+        )
+        if item.image_bytes is None:
+            continue
+        media_type = _image_media_type(item.image_bytes)
+        encoded = base64.b64encode(item.image_bytes).decode("ascii")
+        content.append(
+            {
+                "type": "input_image",
+                "image_url": f"data:{media_type};base64,{encoded}",
+            }
+        )
+    return [
+        {"role": "system", "content": _SYSTEM_PROMPT},
+        {"role": "user", "content": content},
+    ]
+
+
+def execute_ask(
+    request: AskRequest,
+    model: SearchModel,
+    store: SearchStore,
+    answer_client: AskAnswerClient | None = None,
+    *,
+    context: SearchContext | None = None,
+    candidates: tuple[SearchCandidate, ...] | None = None,
+) -> AskOutcome:
+    """Retrieve selected crops, generate structured claims, and resolve citations."""
+    from bird_recognition.embed.search import execute_search
+
+    if not isinstance(request, AskRequest):
+        raise AskValidationError("ask request is invalid")
+    search_request = SearchRequest(
+        query=request.question,
+        run_id=request.run_id,
+        limit=request.evidence_limit,
+    )
+    search_outcome = execute_search(
+        search_request,
+        model,
+        store,
+        context=context,
+        candidates=candidates,
+    )
+
+    evidence = tuple(
+        _evidence_from_result(index, result)
+        for index, result in enumerate(search_outcome.results)
+    )
+    if not evidence:
+        return AskOutcome(
+            status=AskOutcomeStatus.INSUFFICIENT_EVIDENCE,
+            request=request,
+            reason="No eligible crops were retrieved for this question.",
+            context=search_outcome.context,
+        )
+
+    client = answer_client or OpenAIAnswerClient(request.service_config)
+    response_text = client.generate(request.question, evidence)
+    response = _decode_answer_response(response_text)
+    if not response["sufficient_evidence"]:
+        reason = response["insufficient_reason"]
+        return AskOutcome(
+            status=AskOutcomeStatus.INSUFFICIENT_EVIDENCE,
+            request=request,
+            evidence=evidence,
+            reason=(
+                reason.strip()
+                if isinstance(reason, str) and reason.strip()
+                else "The selected evidence is insufficient to answer this question."
+            ),
+            context=search_outcome.context,
+        )
+
+    evidence_by_index = {item.evidence_index: item for item in evidence}
+    claims: list[SupportedClaim] = []
+    for claim_value in response["claims"]:
+        claim_text, claim_indices = _decode_claim(claim_value)
+        citations = tuple(
+            Citation.from_evidence(evidence_by_index[index])
+            for index in dict.fromkeys(claim_indices)
+            if index in evidence_by_index
+        )
+        if not citations:
+            return AskOutcome(
+                status=AskOutcomeStatus.INSUFFICIENT_EVIDENCE,
+                request=request,
+                evidence=evidence,
+                reason=(
+                    "The answer included a claim without a valid citation to "
+                    "selected evidence."
+                ),
+                context=search_outcome.context,
+            )
+        claims.append(SupportedClaim(text=claim_text, citations=citations))
+    if not claims:
+        return AskOutcome(
+            status=AskOutcomeStatus.INSUFFICIENT_EVIDENCE,
+            request=request,
+            evidence=evidence,
+            reason="The answer did not include any cited claims.",
+            context=search_outcome.context,
+        )
+    return AskOutcome(
+        status=AskOutcomeStatus.SUPPORTED,
+        request=request,
+        evidence=evidence,
+        claims=tuple(claims),
+        context=search_outcome.context,
+    )
+
+
+def _evidence_from_result(index: int, result: object) -> EvidenceItem:
+    image_bytes: bytes | None = None
+    image_status: Literal["available", "unavailable"] = "unavailable"
+    if result.image_status == "available":
+        try:
+            image_bytes = result.crop_path.read_bytes()
+        except OSError:
+            image_bytes = None
+        if image_bytes:
+            image_status = "available"
+        else:
+            image_bytes = None
+    return EvidenceItem(
+        evidence_index=index,
+        crop_id=result.crop_id,
+        snapshot_id=result.snapshot_id,
+        representation_id=result.representation_id,
+        decision_id=result.decision_id,
+        source_id=result.source_id,
+        source_video=result.source_video,
+        frame_number=result.frame_number,
+        elapsed_seconds=result.elapsed_seconds,
+        capture_time=result.capture_time,
+        capture_timezone=result.capture_timezone,
+        lighting=result.lighting,
+        species_id=result.assigned_species_id,
+        species_confidence=result.species_confidence,
+        detection_confidence=result.detection_confidence,
+        similarity=result.similarity,
+        image_status=image_status,
+        image_bytes=image_bytes,
+    )
+
+
+def _image_media_type(image: bytes) -> str:
+    if image.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "image/png"
+    if image.startswith(b"\xff\xd8\xff"):
+        return "image/jpeg"
+    if image.startswith((b"GIF87a", b"GIF89a")):
+        return "image/gif"
+    if image.startswith(b"RIFF") and image[8:12] == b"WEBP":
+        return "image/webp"
+    raise AskOperationalError("selected crop image has an unsupported format")
+
+
+def _decode_answer_response(value: object) -> dict[str, object]:
+    try:
+        response = json.loads(value) if isinstance(value, str) else value
+    except json.JSONDecodeError, TypeError:
+        raise AskOperationalError(
+            "answer service returned malformed structured output"
+        ) from None
+    if (
+        not isinstance(response, dict)
+        or set(response)
+        != {"sufficient_evidence", "answer", "insufficient_reason", "claims"}
+        or type(response["sufficient_evidence"]) is not bool
+        or response["answer"] is not None
+        and not isinstance(response["answer"], str)
+        or response["insufficient_reason"] is not None
+        and not isinstance(response["insufficient_reason"], str)
+        or not isinstance(response["claims"], list)
+    ):
+        raise AskOperationalError("answer service returned malformed structured output")
+    return response
+
+
+def _decode_claim(value: object) -> tuple[str, tuple[int, ...]]:
+    if (
+        not isinstance(value, dict)
+        or set(value) != {"text", "evidence_indices"}
+        or not isinstance(value["text"], str)
+        or not value["text"].strip()
+        or not isinstance(value["evidence_indices"], list)
+        or any(type(index) is not int for index in value["evidence_indices"])
+    ):
+        raise AskOperationalError("answer service returned malformed structured output")
+    return value["text"], tuple(value["evidence_indices"])
