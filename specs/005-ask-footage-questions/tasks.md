@@ -17,8 +17,8 @@ description: "Task list for Ask Questions About Footage"
 
 **Purpose**: Add the answer-service dependency and inventory its configuration before implementation.
 
-- [ ] T001 [P] Obtain explicit dependency-change approval, then add the OpenAI SDK to `pyproject.toml` and synchronize `uv.lock`; do not edit the lockfile manually
-- [ ] T002 [P] Add empty `BIRD_RECOGNITION_ASK_API_KEY` and `BIRD_RECOGNITION_ASK_MODEL` placeholders with safe descriptions to `.env.example`
+- [X] T001 [P] Obtain explicit dependency-change approval, then add the OpenAI SDK to `pyproject.toml` and synchronize `uv.lock`; do not edit the lockfile manually
+- [X] T002 [P] Add empty `BIRD_RECOGNITION_ASK_API_KEY` and `BIRD_RECOGNITION_ASK_MODEL` placeholders with safe descriptions to `.env.example`
 
 ---
 
