@@ -26,8 +26,8 @@ description: "Task list for Ask Questions About Footage"
 
 **Purpose**: Establish the Ask-specific configuration and stable request/evidence boundaries used by the stories.
 
-- [ ] T003 [P] Add Ask configuration resolution for API key, model default `gpt-4o-mini`, environment/`.env` precedence, and finite service timeout in `src/bird_recognition/embed/config.py`
-- [ ] T004 [P] Define validated transient request, evidence, claim/citation, and outcome types with the data-model constraints in `src/bird_recognition/ask.py`
+- [X] T003 [P] Add Ask configuration resolution for API key, model default `gpt-4o-mini`, environment/`.env` precedence, and finite service timeout in `src/bird_recognition/embed/config.py`
+- [X] T004 [P] Define validated transient request, evidence, claim/citation, and outcome types with the data-model constraints in `src/bird_recognition/ask.py`
 
 **Checkpoint**: Configuration and request/evidence contracts are ready for story implementation. T001 must be approved and complete before SDK adapter work.
 

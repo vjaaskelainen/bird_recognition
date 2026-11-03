@@ -8,6 +8,7 @@ import json
 import math
 import re
 from collections.abc import Mapping
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -39,10 +40,44 @@ _EMBED_SETTING_ENVIRONMENT = {
     "species_list": "BIRD_RECOGNITION_SPECIES_LIST",
     "threshold": "BIRD_RECOGNITION_SPECIES_THRESHOLD",
 }
+ASK_DEFAULT_MODEL = "gpt-4o-mini"
+ASK_SERVICE_TIMEOUT_SECONDS = 60.0
 
 
 class _DuplicateJsonKeyError(ValueError):
     """Raised when a JSON object repeats a key."""
+
+
+@dataclass(frozen=True, slots=True)
+class AskServiceConfiguration:
+    """Resolved external answer-service settings with a redacted API key."""
+
+    api_key: str = field(repr=False)
+    model: str = ASK_DEFAULT_MODEL
+    timeout_seconds: float = ASK_SERVICE_TIMEOUT_SECONDS
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.api_key, str) or not self.api_key.strip():
+            raise EmbedValidationError("ask API key is required")
+        object.__setattr__(self, "api_key", self.api_key.strip())
+        if not isinstance(self.model, str) or not self.model.strip():
+            raise EmbedValidationError("ask model must not be empty")
+        object.__setattr__(self, "model", self.model.strip())
+        if isinstance(self.timeout_seconds, bool) or not isinstance(
+            self.timeout_seconds, (int, float)
+        ):
+            raise EmbedValidationError(
+                "ask service timeout must be finite and positive"
+            )
+        try:
+            is_finite = math.isfinite(self.timeout_seconds)
+        except OverflowError:
+            is_finite = False
+        if not is_finite or self.timeout_seconds <= 0:
+            raise EmbedValidationError(
+                "ask service timeout must be finite and positive"
+            )
+        object.__setattr__(self, "timeout_seconds", float(self.timeout_seconds))
 
 
 def canonical_json_bytes(value: Any) -> bytes:
@@ -378,6 +413,52 @@ def validate_threshold(value: object = None) -> float:
     if not math.isfinite(threshold) or not 0 <= threshold <= 1:
         raise EmbedValidationError("threshold must be a finite number within [0, 1]")
     return 0.0 if threshold == 0 else threshold
+
+
+def resolve_ask_configuration(
+    *,
+    process_environment: Mapping[str, str | None],
+    dotenv_environment: Mapping[str, str | None],
+) -> AskServiceConfiguration:
+    """Resolve Ask credentials and model from process, dotenv, then defaults."""
+    api_key = _resolve_ask_setting(
+        "BIRD_RECOGNITION_ASK_API_KEY",
+        "ask API key",
+        process_environment=process_environment,
+        dotenv_environment=dotenv_environment,
+        required=True,
+    )
+    model = _resolve_ask_setting(
+        "BIRD_RECOGNITION_ASK_MODEL",
+        "ask model",
+        process_environment=process_environment,
+        dotenv_environment=dotenv_environment,
+        default=ASK_DEFAULT_MODEL,
+        empty_is_missing=True,
+    )
+    return AskServiceConfiguration(api_key=api_key, model=model)
+
+
+def _resolve_ask_setting(
+    name: str,
+    description: str,
+    *,
+    process_environment: Mapping[str, str | None],
+    dotenv_environment: Mapping[str, str | None],
+    default: str | None = None,
+    required: bool = False,
+    empty_is_missing: bool = False,
+) -> str:
+    value = process_environment.get(name)
+    if value is None or (empty_is_missing and not value.strip()):
+        value = dotenv_environment.get(name)
+    if value is None or (empty_is_missing and not value.strip()):
+        value = default
+    if required and (not isinstance(value, str) or not value.strip()):
+        raise EmbedValidationError(f"{description} is required")
+    if not isinstance(value, str) or not value.strip():
+        raise EmbedValidationError(f"{description} must not be empty")
+    return value.strip()
 
 
 def resolve_embed_configuration(

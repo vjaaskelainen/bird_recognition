@@ -7,9 +7,13 @@ from pathlib import Path
 import pytest
 
 from bird_recognition.embed.config import (
+    ASK_DEFAULT_MODEL,
+    ASK_SERVICE_TIMEOUT_SECONDS,
+    AskServiceConfiguration,
     build_tagging_config,
     canonical_json_bytes,
     load_species_candidates,
+    resolve_ask_configuration,
     resolve_embed_configuration,
     sanitize_error,
     validate_local_database_url,
@@ -834,3 +838,62 @@ def test_resolve_embed_configuration_rejects_and_redacts_remote_database_url() -
 
     assert "private-password" not in str(error.value)
     assert "remote.example" not in str(error.value)
+
+
+def test_resolve_ask_configuration_uses_process_environment_before_dotenv() -> None:
+    resolved = resolve_ask_configuration(
+        process_environment={
+            "BIRD_RECOGNITION_ASK_API_KEY": " process-key ",
+            "BIRD_RECOGNITION_ASK_MODEL": " process-model ",
+        },
+        dotenv_environment={
+            "BIRD_RECOGNITION_ASK_API_KEY": "dotenv-key",
+            "BIRD_RECOGNITION_ASK_MODEL": "dotenv-model",
+        },
+    )
+
+    assert resolved.api_key == "process-key"
+    assert resolved.model == "process-model"
+    assert resolved.timeout_seconds == ASK_SERVICE_TIMEOUT_SECONDS
+    assert resolved.timeout_seconds > 0
+    assert "process-key" not in repr(resolved)
+
+
+def test_resolve_ask_configuration_uses_dotenv_key_and_default_model() -> None:
+    resolved = resolve_ask_configuration(
+        process_environment={},
+        dotenv_environment={
+            "BIRD_RECOGNITION_ASK_API_KEY": "dotenv-key",
+            "BIRD_RECOGNITION_ASK_MODEL": "",
+        },
+    )
+
+    assert resolved.api_key == "dotenv-key"
+    assert resolved.model == ASK_DEFAULT_MODEL
+
+
+def test_resolve_ask_configuration_requires_key_without_exposing_it() -> None:
+    with pytest.raises(EmbedValidationError, match="ask API key is required") as error:
+        resolve_ask_configuration(
+            process_environment={"BIRD_RECOGNITION_ASK_API_KEY": " "},
+            dotenv_environment={"BIRD_RECOGNITION_ASK_API_KEY": "fallback-key"},
+        )
+
+    assert "fallback-key" not in str(error.value)
+
+
+@pytest.mark.parametrize(
+    "values",
+    [
+        {"api_key": ""},
+        {"model": " "},
+        {"timeout_seconds": 0},
+        {"timeout_seconds": float("inf")},
+        {"timeout_seconds": True},
+    ],
+)
+def test_ask_service_configuration_rejects_invalid_values(
+    values: dict[str, object],
+) -> None:
+    with pytest.raises(EmbedValidationError):
+        AskServiceConfiguration(**{"api_key": "test-key", **values})
