@@ -1325,6 +1325,11 @@ def _ask_payload(outcome: object) -> dict[str, object]:
             {
                 "evidence_index": item.evidence_index,
                 "crop_id": item.crop_id,
+                "support": (
+                    "retrieved_not_supporting"
+                    if outcome.status.value == "insufficient_evidence"
+                    else "selected"
+                ),
                 "image_status": item.image_status,
                 "source_video": item.source_video,
                 "frame_number": item.frame_number,
@@ -1361,6 +1366,15 @@ def _render_ask_outcome(outcome: object, *, json_output: bool) -> None:
     print(f"Evidence items: {len(outcome.evidence)}")
     if outcome.status.value != "supported":
         print(f"Insufficient evidence: {outcome.reason}")
+        if outcome.evidence:
+            print("Retrieved evidence (not supporting an answer):")
+            for item in outcome.evidence:
+                capture_time = item.capture_time or "unknown"
+                print(
+                    f"   Retrieved: crop {item.crop_id}; "
+                    f"source {item.source_video}; frame {item.frame_number}; "
+                    f"capture time {capture_time}; image {item.image_status}"
+                )
         return
     print("Answer:")
     for claim_index, claim in enumerate(outcome.claims, start=1):

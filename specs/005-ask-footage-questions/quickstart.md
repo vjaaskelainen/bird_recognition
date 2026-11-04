@@ -1,12 +1,12 @@
-# Ask User Story 1 Validation Quickstart
+# Ask User Stories 1 and 2 Validation Quickstart
 
-This guide validates the grounded-answer MVP without private footage, network
-access, or an API key. It is not evidence of real-world answer quality.
+This guide validates grounded answers and safe declines without private footage,
+network access, or an API key. It is not evidence of real-world answer quality.
 
 ## Prerequisites
 
 - Python project environment synchronized with the approved dependency set.
-- The User Story 1 unit tests and fake search/answer-service fixtures.
+- The User Story 1 and 2 unit tests and fake search/answer-service fixtures.
 - For optional local acceptance only: an existing completed index run, its local
   PostgreSQL/pgvector database, matching BioCLIP model assets, retained crops, an
   OpenAI API key configured privately, and an available vision model.
@@ -31,6 +31,11 @@ The controlled cases establish that:
   to the selected crop, source video, frame, and known capture time.
 - Invalid citation indices are discarded, and uncited claims are not presented
   as supported.
+- Empty retrieval skips the answer service; explicit insufficiency, unrelated
+  questions, absence questions, and count/frequency questions follow the
+  insufficient-evidence rules without fabricated citations.
+- Retrieved evidence accompanying a decline is labeled as nonsupporting and is
+  shown without citations.
 - The CLI accepts the question, selected run, and evidence limit and renders both
   human-readable and schema-version-1 JSON supported answers.
 - Retrieval and answer generation use controlled substitutes; tests require no
@@ -48,9 +53,9 @@ The controlled cases establish that:
    to the displayed crop, source video, frame, and known capture time.
 4. Repeat the same question and run to compare evidence selection and ordering.
    The command currently uses the default limit of five unless `--limit` is set.
-5. Remember that the transmission notice, filters, and additional decline and
-   failure safeguards are planned for later stories; don't treat this MVP as the
-   completed Ask feature.
+5. Date, lighting, and species filters, the transmission notice, and additional
+   operational-failure safeguards remain planned for later stories. Declines
+   already avoid presenting retrieved-but-nonsupporting evidence as citations.
 
 An API-backed run can demonstrate command behavior for that collection but is not
 a measured answer-quality evaluation. Keep labels and generated reports private;

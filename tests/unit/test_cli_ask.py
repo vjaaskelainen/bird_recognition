@@ -6,6 +6,8 @@ from pathlib import Path
 from types import SimpleNamespace
 from uuid import UUID
 
+import pytest
+
 from bird_recognition.ask import (
     AskOutcome,
     AskOutcomeStatus,
@@ -74,6 +76,17 @@ def _outcome() -> AskOutcome:
     )
 
 
+def _declined_outcome() -> AskOutcome:
+    outcome = _outcome()
+    return AskOutcome(
+        status=AskOutcomeStatus.INSUFFICIENT_EVIDENCE,
+        request=outcome.request,
+        evidence=outcome.evidence,
+        reason="The retrieved evidence does not establish an answer.",
+        context=outcome.context,
+    )
+
+
 def test_ask_parser_accepts_story_one_question_and_run_options() -> None:
     arguments = _build_parser().parse_args(
         [
@@ -121,10 +134,38 @@ def test_ask_human_output_renders_claim_and_source_frame(capsys) -> None:
     assert "2026-10-25T22:00:00" in rendered
 
 
-def test_ask_dispatch_uses_read_only_search_and_renders_supported_result(
-    monkeypatch, capsys
+def test_ask_json_decline_marks_evidence_as_retrieved_but_nonsupporting() -> None:
+    payload = _ask_payload(_declined_outcome())
+
+    assert payload["status"] == "insufficient_evidence"
+    assert payload["reason"] == "The retrieved evidence does not establish an answer."
+    assert payload["claims"] == []
+    assert payload["evidence"][0]["support"] == "retrieved_not_supporting"
+    assert "citations" not in payload["evidence"][0]
+
+
+def test_ask_human_decline_lists_nonsupporting_evidence_without_citations(
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
-    outcome = _outcome()
+    _render_ask_outcome(_declined_outcome(), json_output=False)
+
+    rendered = capsys.readouterr().out
+    assert "The retrieved evidence does not establish an answer." in rendered
+    assert "Retrieved evidence (not supporting an answer)" in rendered
+    assert "crop-1" in rendered
+    assert "camera.mp4" in rendered
+    assert "frame 10" in rendered
+    assert "Citation" not in rendered
+
+
+@pytest.mark.parametrize(
+    ("declined", "expected_status"),
+    [(False, "answered"), (True, "insufficient_evidence")],
+)
+def test_ask_dispatch_returns_success_for_supported_or_declined_result(
+    declined: bool, expected_status: str, monkeypatch, capsys
+) -> None:
+    outcome = _declined_outcome() if declined else _outcome()
     store_calls: list[object] = []
 
     class FakeStore:
@@ -172,6 +213,6 @@ def test_ask_dispatch_uses_read_only_search_and_renders_supported_result(
     )
 
     assert exit_code == 0
-    assert json.loads(capsys.readouterr().out)["status"] == "answered"
+    assert json.loads(capsys.readouterr().out)["status"] == expected_status
     assert ("preflight", True) in store_calls
     assert any(call[0] == "search" for call in store_calls)

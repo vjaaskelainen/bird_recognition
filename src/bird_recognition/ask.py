@@ -388,11 +388,16 @@ class OpenAIAnswerClient:
 
 _SYSTEM_PROMPT = (
     "Answer only from the supplied image pixels and metadata. Do not use general "
-    "knowledge to fill gaps. Return distinct checkable claims and cite every claim "
-    "with one or more supplied evidence indices. If the evidence does not support "
-    "an answer, state that it is insufficient. A species decision, confidence, or "
-    "similarity is not proof of identity or occurrence. Do not describe metadata-only "
-    "evidence as visually inspected."
+    "knowledge to fill gaps, and decline questions unrelated to the footage. Return "
+    "distinct checkable claims and cite every claim with one or more supplied "
+    "evidence indices. If the evidence does not support an answer, state that it is "
+    "insufficient. Do not make claims of universal absence; report only what was or "
+    "was not found in the supplied evidence, and never claim that an event never "
+    "occurred anywhere in the footage. Do not provide exact counts or visit frequency "
+    "from a limited crop set; decline and explain this limitation when asked. Species "
+    "decisions, confidence, and similarity are suggestions or relevance signals, not "
+    "proof of identity or occurrence. Do not describe metadata-only evidence as "
+    "visually inspected."
 )
 _ANSWER_SCHEMA = {
     "type": "object",

@@ -64,14 +64,14 @@ description: "Task list for Ask Questions About Footage"
 
 ### Tests for User Story 2
 
-- [ ] T012 [P] [US2] Add offline tests for empty retrieval, explicit insufficiency, unrelated questions, invalid citations, absence questions, and count/frequency limits in `tests/unit/test_ask.py`
-- [ ] T013 [P] [US2] Add CLI tests for decline output, absence of fabricated citations, and successful decline exit codes in `tests/unit/test_cli_ask.py`
+- [X] T012 [P] [US2] Add offline tests for empty retrieval, explicit insufficiency, unrelated questions, invalid citations, absence questions, and count/frequency limits in `tests/unit/test_ask.py`
+- [X] T013 [P] [US2] Add CLI tests for decline output, absence of fabricated citations, and successful decline exit codes in `tests/unit/test_cli_ask.py`
 
 ### Implementation for User Story 2
 
-- [ ] T014 [US2] Return insufficient evidence without invoking the answer client when retrieval is empty, and downgrade responses with unsupported claims in `src/bird_recognition/ask.py`
-- [ ] T015 [US2] Enforce prompt and outcome rules against universal absence, exact counts/frequency, general-knowledge answers, and species/similarity claims presented as proof in `src/bird_recognition/ask.py`
-- [ ] T016 [US2] Render decline reasons and any retrieved-but-nonsupporting evidence without valid-support citations in `src/bird_recognition/cli.py`
+- [X] T014 [US2] Return insufficient evidence without invoking the answer client when retrieval is empty, and downgrade responses with unsupported claims in `src/bird_recognition/ask.py`
+- [X] T015 [US2] Enforce prompt and outcome rules against universal absence, exact counts/frequency, general-knowledge answers, and species/similarity claims presented as proof in `src/bird_recognition/ask.py`
+- [X] T016 [US2] Render decline reasons and any retrieved-but-nonsupporting evidence without valid-support citations in `src/bird_recognition/cli.py`
 
 **Checkpoint**: Empty and explicitly insufficient evidence produce declines, never fabricated citations or operational failures.
 

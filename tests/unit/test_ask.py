@@ -255,6 +255,20 @@ def test_build_answer_input_includes_question_metadata_and_selected_image() -> N
     assert user_content[2]["image_url"].startswith("data:image/")
 
 
+def test_build_answer_input_constrains_absence_count_and_unrelated_questions() -> None:
+    messages = build_answer_input(
+        replace(_request(), question="Did a fox ever visit, and how often?"),
+        (_evidence(),),
+    )
+
+    system_prompt = messages[0]["content"]
+    assert "unrelated to the footage" in system_prompt
+    assert "general knowledge" in system_prompt
+    assert "universal absence" in system_prompt
+    assert "exact counts or visit frequency" in system_prompt
+    assert "Species decisions, confidence, and similarity" in system_prompt
+
+
 def test_openai_adapter_uses_strict_schema_and_finite_timeout(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -442,4 +456,42 @@ def test_execute_ask_does_not_call_answer_client_when_search_is_empty() -> None:
     outcome = execute_ask(request, model, store, client)
 
     assert outcome.status is AskOutcomeStatus.INSUFFICIENT_EVIDENCE
+    assert outcome.evidence == ()
+    assert outcome.claims == ()
+    assert outcome.reason
     assert client.calls == []
+
+
+def test_execute_ask_drops_claims_when_answer_client_declines(
+    tmp_path: Path,
+) -> None:
+    request = _request()
+    context = _search_context()
+    crop_path = tmp_path / "crop.png"
+    crop_path.write_bytes(b"\x89PNG\r\n\x1a\ncrop-image")
+    candidate = SearchCandidate(
+        result=_search_result(crop_path),
+        embedding=(1.0,) + (0.0,) * 511,
+    )
+    model = SimpleNamespace(
+        identity=SimpleNamespace(model_fingerprint=context.model_fingerprint),
+        encode_texts=lambda _: ((1.0,) + (0.0,) * 511,),
+    )
+    store = SimpleNamespace(load_search_collection=lambda _: (context, (candidate,)))
+    client = _AnswerClient(
+        json.dumps(
+            {
+                "sufficient_evidence": False,
+                "answer": None,
+                "insufficient_reason": "The evidence does not establish a visit count.",
+                "claims": [{"text": "A fox visited once.", "evidence_indices": [0]}],
+            }
+        )
+    )
+
+    outcome = execute_ask(request, model, store, client)
+
+    assert outcome.status is AskOutcomeStatus.INSUFFICIENT_EVIDENCE
+    assert outcome.reason == "The evidence does not establish a visit count."
+    assert outcome.claims == ()
+    assert len(outcome.evidence) == 1

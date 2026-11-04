@@ -1,9 +1,9 @@
 # CLI Contract: Ask Questions About Footage
 
-**Status**: User Story 1 is implemented. The date, lighting, and species filters
-in this end-state contract are planned for later stories. The current command
-accepts `QUESTION`, `--run-id`, `--limit`, `--database-url`, `--model-dir`, and
-`--json`. See
+**Status**: User Stories 1 and 2 are implemented. The date, lighting, and species
+filters in this end-state contract are planned for a later story. The current
+command accepts `QUESTION`, `--run-id`, `--limit`, `--database-url`, `--model-dir`,
+and `--json`. See
 [data model](../data-model.md) for request/outcome semantics and
 [quickstart](../quickstart.md) for validation.
 
@@ -116,6 +116,7 @@ Supported result:
     {
       "evidence_index": 0,
       "crop_id": "stable-crop-id",
+      "support": "selected",
       "image_status": "available",
       "similarity": 0.75,
       "species": {"id": "candidate-id", "confidence": 0.8},
@@ -135,8 +136,12 @@ selected evidence; model-supplied identifiers are not trusted.
 
 An insufficient-evidence response uses `status: "insufficient_evidence"`, a
 human-readable `reason`, and selected evidence (if any) labeled as retrieved but
-not supporting an answer. Empty retrieval has `evidence_count: 0` and does not
-contact the answer service.
+not supporting an answer with `support: "retrieved_not_supporting"` on each
+evidence item. It has no claims or citations. Empty retrieval has
+`evidence_count: 0` and does not contact the answer service. The answer service is
+instructed to decline unrelated questions, avoid universal absence claims, and
+decline exact counts or visit-frequency questions that a limited crop set cannot
+establish.
 
 ## Failure envelopes
 

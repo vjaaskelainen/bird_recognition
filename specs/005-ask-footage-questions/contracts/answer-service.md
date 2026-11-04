@@ -1,6 +1,6 @@
 # Answer Service Contract
 
-**Status**: Planned OpenAI Responses API adapter. The provider interface is
+**Status**: Implemented OpenAI Responses API adapter. The provider interface is
 internal to the CLI; the user's observable request/output contract is in
 [cli.md](cli.md).
 
