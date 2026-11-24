@@ -442,6 +442,10 @@ def _build_parser() -> argparse.ArgumentParser:
     ask_parser.add_argument("question", help="nonblank question about the footage")
     ask_parser.add_argument("--run-id", required=True)
     ask_parser.add_argument("--limit", type=int, default=5)
+    ask_parser.add_argument("--start-date", type=_parse_search_date)
+    ask_parser.add_argument("--end-date", type=_parse_search_date)
+    ask_parser.add_argument("--lighting", choices=("day", "night"))
+    ask_parser.add_argument("--species-id")
     ask_parser.add_argument("--database-url")
     ask_parser.add_argument("--model-dir", type=Path)
     ask_parser.add_argument("--json", action="store_true")
@@ -641,11 +645,11 @@ def _dispatch_embed_command(arguments: argparse.Namespace) -> int:
         if arguments.command == "ask":
             from bird_recognition.ask import (
                 AskRequest,
+                build_search_request,
                 execute_ask,
             )
             from bird_recognition.embed.bioclip import load_bioclip
             from bird_recognition.embed.config import resolve_ask_configuration
-            from bird_recognition.embed.models import SearchRequest
 
             service_configuration = resolve_ask_configuration(
                 process_environment=os.environ,
@@ -657,14 +661,18 @@ def _dispatch_embed_command(arguments: argparse.Namespace) -> int:
                 database_url=arguments.database_url,
                 model_dir=Path(resolved["model_dir"]),
                 service_config=service_configuration,
+                start_date=arguments.start_date,
+                end_date=arguments.end_date,
+                lighting=(
+                    Lighting(arguments.lighting)
+                    if arguments.lighting is not None
+                    else None
+                ),
+                species_id=arguments.species_id,
                 evidence_limit=arguments.limit,
                 output_format="json" if arguments.json else "text",
             )
-            search_request = SearchRequest(
-                query=request.question,
-                run_id=request.run_id,
-                limit=request.evidence_limit,
-            )
+            search_request = build_search_request(request)
             with closing(PgVectorStore(arguments.database_url)) as store:
                 try:
                     store.preflight(read_only=True)
@@ -1286,10 +1294,18 @@ def _ask_payload(outcome: object) -> dict[str, object]:
         ),
         "question": request.question,
         "filters": {
-            "start_date": None,
-            "end_date": None,
-            "lighting": None,
-            "species_id": None,
+            "start_date": (
+                request.start_date.isoformat()
+                if request.start_date is not None
+                else None
+            ),
+            "end_date": (
+                request.end_date.isoformat() if request.end_date is not None else None
+            ),
+            "lighting": (
+                request.lighting.value if request.lighting is not None else None
+            ),
+            "species_id": request.species_id,
         },
         "requested_limit": request.evidence_limit,
         "evidence_count": len(outcome.evidence),
@@ -1325,6 +1341,7 @@ def _ask_payload(outcome: object) -> dict[str, object]:
             {
                 "evidence_index": item.evidence_index,
                 "crop_id": item.crop_id,
+                "source_id": item.source_id,
                 "support": (
                     "retrieved_not_supporting"
                     if outcome.status.value == "insufficient_evidence"
@@ -1333,8 +1350,10 @@ def _ask_payload(outcome: object) -> dict[str, object]:
                 "image_status": item.image_status,
                 "source_video": item.source_video,
                 "frame_number": item.frame_number,
+                "elapsed_seconds": item.elapsed_seconds,
                 "capture_time": item.capture_time,
                 "capture_timezone": item.capture_timezone,
+                "lighting": item.lighting.value,
                 "similarity": item.similarity,
                 "species": {
                     "id": item.species_id or "unknown",
@@ -1362,19 +1381,31 @@ def _render_ask_outcome(outcome: object, *, json_output: bool) -> None:
         )
         return
     print(f"Question: {outcome.request.question}")
+    lighting_filter = (
+        outcome.request.lighting.value
+        if outcome.request.lighting is not None
+        else "none"
+    )
+    print(
+        "Filters: "
+        f"start={outcome.request.start_date or 'none'}, "
+        f"end={outcome.request.end_date or 'none'}, "
+        f"lighting={lighting_filter}, "
+        f"species={outcome.request.species_id or 'none'}"
+    )
+    print(f"Evidence limit: {outcome.request.evidence_limit}")
     print(f"Run: {outcome.request.run_id}")
+    if outcome.context is not None:
+        print(f"Model fingerprint: {outcome.context.model_fingerprint}")
+        print(f"Tagging config fingerprint: {outcome.context.config_fingerprint}")
+        print(f"Candidate set fingerprint: {outcome.context.candidate_set_fingerprint}")
     print(f"Evidence items: {len(outcome.evidence)}")
     if outcome.status.value != "supported":
         print(f"Insufficient evidence: {outcome.reason}")
         if outcome.evidence:
             print("Retrieved evidence (not supporting an answer):")
             for item in outcome.evidence:
-                capture_time = item.capture_time or "unknown"
-                print(
-                    f"   Retrieved: crop {item.crop_id}; "
-                    f"source {item.source_video}; frame {item.frame_number}; "
-                    f"capture time {capture_time}; image {item.image_status}"
-                )
+                _render_ask_evidence(item)
         return
     print("Answer:")
     for claim_index, claim in enumerate(outcome.claims, start=1):
@@ -1386,6 +1417,30 @@ def _render_ask_outcome(outcome: object, *, json_output: bool) -> None:
                 f"source {citation.source_video}; frame {citation.frame_number}; "
                 f"capture time {capture_time}"
             )
+    if outcome.evidence:
+        print("Selected evidence:")
+        for item in outcome.evidence:
+            _render_ask_evidence(item)
+
+
+def _render_ask_evidence(item: object) -> None:
+    capture_time = item.capture_time or "unknown"
+    species_id = item.species_id or "unknown"
+    species_confidence = (
+        f"{item.species_confidence:.6f}"
+        if item.species_confidence is not None
+        else "unknown"
+    )
+    print(
+        f"   Evidence {item.evidence_index}: crop {item.crop_id}; "
+        f"source {item.source_video} ({item.source_id}); "
+        f"frame {item.frame_number}; elapsed {item.elapsed_seconds:.3f}s; "
+        f"capture time {capture_time}; lighting {item.lighting.value}; "
+        f"image {item.image_status}"
+    )
+    print(f"      Similarity: {item.similarity:.6f}")
+    print(f"      Species decision: {species_id}; confidence: {species_confidence}")
+    print(f"      Detection confidence: {item.detection_confidence:.6f}")
 
 
 def _render_search_summary(outcome: object) -> None:

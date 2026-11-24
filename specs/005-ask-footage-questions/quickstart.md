@@ -1,12 +1,13 @@
-# Ask User Stories 1 and 2 Validation Quickstart
+# Ask User Stories 1-3 Validation Quickstart
 
-This guide validates grounded answers and safe declines without private footage,
-network access, or an API key. It is not evidence of real-world answer quality.
+This guide validates grounded answers, safe declines, metadata filters, and
+auditable evidence output without private footage, network access, or an API key.
+It is not evidence of real-world answer quality.
 
 ## Prerequisites
 
 - Python project environment synchronized with the approved dependency set.
-- The User Story 1 and 2 unit tests and fake search/answer-service fixtures.
+- The User Story 1-3 unit tests and fake search/answer-service fixtures.
 - For optional local acceptance only: an existing completed index run, its local
   PostgreSQL/pgvector database, matching BioCLIP model assets, retained crops, an
   OpenAI API key configured privately, and an available vision model.
@@ -38,6 +39,12 @@ The controlled cases establish that:
   shown without citations.
 - The CLI accepts the question, selected run, and evidence limit and renders both
   human-readable and schema-version-1 JSON supported answers.
+- Date bounds are strict inclusive calendar dates; lighting and species filters
+  constrain candidates before the limit, including eligible crops outside the
+  unfiltered top results.
+- Repeated equal-score candidates use stable crop-ID ordering, and unavailable
+  images retain their provenance with separately labeled similarity, species,
+  and detection-confidence values.
 - Retrieval and answer generation use controlled substitutes; tests require no
   external credentials or network access.
 
@@ -49,13 +56,16 @@ The controlled cases establish that:
 2. Select a complete index run and confirm its context with the existing
    `inspect --run-id` command.
 3. Use the `ask` command documented in [CLI contract](contracts/cli.md) with a
-   question known to have relevant evidence. Confirm each claim's citation maps
-   to the displayed crop, source video, frame, and known capture time.
+   question known to have relevant evidence. Optionally add `--start-date`,
+   `--end-date`, `--lighting`, and `--species-id`; confirm the displayed filters,
+   evidence limit/count, selected run/tagging context, and each claim's citation
+   mapping to the crop, source video, frame, and known capture time.
 4. Repeat the same question and run to compare evidence selection and ordering.
    The command currently uses the default limit of five unless `--limit` is set.
-5. Date, lighting, and species filters, the transmission notice, and additional
-   operational-failure safeguards remain planned for later stories. Declines
-   already avoid presenting retrieved-but-nonsupporting evidence as citations.
+5. Date, lighting, and species filters are applied by the same search contract.
+   The transmission notice and additional operational-failure safeguards remain
+   planned for User Story 4. Declines do not present retrieved-but-nonsupporting
+   evidence as citations.
 
 An API-backed run can demonstrate command behavior for that collection but is not
 a measured answer-quality evaluation. Keep labels and generated reports private;

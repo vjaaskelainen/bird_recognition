@@ -22,6 +22,7 @@ from bird_recognition.ask import (
     OpenAIAnswerClient,
     SupportedClaim,
     build_answer_input,
+    build_search_request,
     execute_ask,
 )
 from bird_recognition.embed.config import AskServiceConfiguration
@@ -87,6 +88,27 @@ def test_ask_request_rejects_reversed_date_bounds() -> None:
         AskValidationError, match="start date must not be after end date"
     ):
         replace(_request(), start_date=date(2026, 2, 1), end_date=date(2026, 1, 1))
+
+
+def test_build_search_request_preserves_question_filters_and_limit() -> None:
+    request = replace(
+        _request(),
+        start_date=date(2026, 10, 25),
+        end_date=date(2026, 10, 26),
+        lighting=Lighting.NIGHT,
+        species_id="bird",
+        evidence_limit=2,
+    )
+
+    search_request = build_search_request(request)
+
+    assert search_request.query == request.question
+    assert search_request.run_id == request.run_id
+    assert search_request.start_date == request.start_date
+    assert search_request.end_date == request.end_date
+    assert search_request.lighting is Lighting.NIGHT
+    assert search_request.species_id == "bird"
+    assert search_request.limit == 2
 
 
 def test_ask_request_repr_does_not_expose_credentials_or_database_url() -> None:
@@ -371,6 +393,196 @@ def test_execute_ask_resolves_valid_claim_indices_to_selected_provenance(
     )
     assert outcome.evidence[0].image_bytes is not None
     assert len(client.calls) == 1
+
+
+def test_execute_ask_applies_metadata_filters_before_limit_in_stable_order(
+    tmp_path: Path,
+) -> None:
+    request = replace(
+        _request(),
+        start_date=date(2026, 10, 25),
+        end_date=date(2026, 10, 26),
+        lighting=Lighting.NIGHT,
+        species_id="bird",
+        evidence_limit=2,
+    )
+    context = _search_context(
+        ("a-too-early", "b-too-late", "c-day", "d-other", "z-boundary", "y-boundary")
+    )
+    base_result = _search_result(tmp_path / "missing.png")
+    results = (
+        replace(base_result, crop_id="a-too-early", capture_time="2026-10-24T23:00:00"),
+        replace(base_result, crop_id="b-too-late", capture_time="2026-10-27T23:00:00"),
+        replace(
+            base_result,
+            crop_id="c-day",
+            capture_time="2026-10-25T12:00:00",
+            lighting=Lighting.DAY,
+        ),
+        replace(
+            base_result,
+            crop_id="d-other",
+            capture_time="2026-10-25T23:00:00",
+            assigned_species_id="owl",
+        ),
+        replace(
+            base_result,
+            crop_id="z-boundary",
+            capture_time="2026-10-25T23:00:00",
+        ),
+        replace(
+            base_result,
+            crop_id="y-boundary",
+            capture_time="2026-10-26T23:00:00",
+        ),
+    )
+    candidates = tuple(
+        SearchCandidate(result=result, embedding=(1.0,) + (0.0,) * 511)
+        for result in results
+    )
+    model = SimpleNamespace(
+        identity=SimpleNamespace(model_fingerprint=context.model_fingerprint),
+        encode_texts=lambda _: ((1.0,) + (0.0,) * 511,),
+    )
+    store = SimpleNamespace(load_search_collection=lambda _: (context, candidates))
+    client = _AnswerClient(
+        json.dumps(
+            {
+                "sufficient_evidence": False,
+                "answer": None,
+                "insufficient_reason": "The evidence is not sufficient.",
+                "claims": [],
+            }
+        )
+    )
+
+    outcome = execute_ask(request, model, store, client)
+
+    assert [item.crop_id for item in outcome.evidence] == ["y-boundary", "z-boundary"]
+    assert [item.image_status for item in outcome.evidence] == [
+        "unavailable",
+        "unavailable",
+    ]
+    assert [item.evidence_index for item in outcome.evidence] == [0, 1]
+    assert len(client.calls[0][1]) == 2
+
+
+def test_execute_ask_includes_both_date_boundaries_when_date_filtering_alone(
+    tmp_path: Path,
+) -> None:
+    request = replace(
+        _request(),
+        start_date=date(2026, 10, 25),
+        end_date=date(2026, 10, 26),
+    )
+    crop_ids = ("before", "start-boundary", "end-boundary", "after", "unknown-time")
+    context = _search_context(crop_ids)
+    base_result = _search_result(tmp_path / "missing.png")
+    results = (
+        replace(base_result, crop_id="before", capture_time="2026-10-24T23:59:59"),
+        replace(
+            base_result,
+            crop_id="start-boundary",
+            capture_time="2026-10-25T00:00:00",
+        ),
+        replace(
+            base_result,
+            crop_id="end-boundary",
+            capture_time="2026-10-26T23:59:59",
+        ),
+        replace(base_result, crop_id="after", capture_time="2026-10-27T00:00:00"),
+        replace(base_result, crop_id="unknown-time", capture_time=None),
+    )
+    candidates = tuple(
+        SearchCandidate(result=result, embedding=(1.0,) + (0.0,) * 511)
+        for result in results
+    )
+    model = SimpleNamespace(
+        identity=SimpleNamespace(model_fingerprint=context.model_fingerprint),
+        encode_texts=lambda _: ((1.0,) + (0.0,) * 511,),
+    )
+    store = SimpleNamespace(load_search_collection=lambda _: (context, candidates))
+    client = _AnswerClient(
+        json.dumps(
+            {
+                "sufficient_evidence": False,
+                "answer": None,
+                "insufficient_reason": "The evidence is not sufficient.",
+                "claims": [],
+            }
+        )
+    )
+
+    outcome = execute_ask(request, model, store, client)
+
+    assert [item.crop_id for item in outcome.evidence] == [
+        "end-boundary",
+        "start-boundary",
+    ]
+
+
+@pytest.mark.parametrize(
+    ("field", "filter_value", "matching", "nonmatching"),
+    [
+        (
+            "lighting",
+            Lighting.NIGHT,
+            {"lighting": Lighting.NIGHT},
+            {"lighting": Lighting.DAY},
+        ),
+        (
+            "species_id",
+            "bird",
+            {"assigned_species_id": "bird"},
+            {"assigned_species_id": "owl"},
+        ),
+        (
+            "species_id",
+            "unknown",
+            {"assigned_species_id": None},
+            {"assigned_species_id": "bird"},
+        ),
+    ],
+)
+def test_execute_ask_applies_lighting_and_species_filters(
+    tmp_path: Path,
+    field: str,
+    filter_value: object,
+    matching: dict[str, object],
+    nonmatching: dict[str, object],
+) -> None:
+    request = replace(_request(), **{field: filter_value}, evidence_limit=5)
+    context = _search_context(("matching", "nonmatching"))
+    base_result = _search_result(tmp_path / "missing.png")
+    candidates = tuple(
+        SearchCandidate(
+            result=replace(base_result, crop_id=crop_id, **changes),
+            embedding=(1.0,) + (0.0,) * 511,
+        )
+        for crop_id, changes in (
+            ("matching", matching),
+            ("nonmatching", nonmatching),
+        )
+    )
+    model = SimpleNamespace(
+        identity=SimpleNamespace(model_fingerprint=context.model_fingerprint),
+        encode_texts=lambda _: ((1.0,) + (0.0,) * 511,),
+    )
+    store = SimpleNamespace(load_search_collection=lambda _: (context, candidates))
+    client = _AnswerClient(
+        json.dumps(
+            {
+                "sufficient_evidence": False,
+                "answer": None,
+                "insufficient_reason": "The evidence is not sufficient.",
+                "claims": [],
+            }
+        )
+    )
+
+    outcome = execute_ask(request, model, store, client)
+
+    assert [item.crop_id for item in outcome.evidence] == ["matching"]
 
 
 def test_execute_ask_discards_invalid_indices_and_downgrades_uncited_claims(

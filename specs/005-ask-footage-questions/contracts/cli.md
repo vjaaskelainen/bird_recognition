@@ -1,9 +1,9 @@
 # CLI Contract: Ask Questions About Footage
 
-**Status**: User Stories 1 and 2 are implemented. The date, lighting, and species
-filters in this end-state contract are planned for a later story. The current
-command accepts `QUESTION`, `--run-id`, `--limit`, `--database-url`, `--model-dir`,
-and `--json`. See
+**Status**: User Stories 1, 2, and 3 are implemented. Transmission notices and
+additional operational safeguards remain planned for User Story 4. The command
+accepts `QUESTION`, `--run-id`, `--limit`, optional date/lighting/species filters,
+`--database-url`, `--model-dir`, and `--json`. See
 [data model](../data-model.md) for request/outcome semantics and
 [quickstart](../quickstart.md) for validation.
 
@@ -13,14 +13,19 @@ and `--json`. See
 .\.venv\Scripts\uv.exe run bird-recognition ask `
   "Which birds visited the feeder at night?" `
   --run-id "<completed-index-run-uuid>" `
+  --start-date 2026-10-01 `
+  --end-date 2026-10-31 `
+  --lighting night `
+  --species-id bird-candidate `
   --limit 5 `
   --json
 ```
 
 The question is required and nonblank. The explicit `--run-id` selects one
 complete indexed collection and its exact tagging context. Ask uses existing
-search behavior and does not ingest footage, recompute stored representations,
-or modify database rows, crops, manifests, or species decisions.
+search behavior, applies metadata filters before the evidence limit, and does
+not ingest footage, recompute stored representations, or modify database rows,
+crops, manifests, or species decisions.
 
 ## Options
 
@@ -116,6 +121,7 @@ Supported result:
     {
       "evidence_index": 0,
       "crop_id": "stable-crop-id",
+      "source_id": "stable-source-id",
       "support": "selected",
       "image_status": "available",
       "similarity": 0.75,
@@ -123,8 +129,10 @@ Supported result:
       "detection_confidence": 0.9,
       "source_video": "camera-video.mp4",
       "frame_number": 10,
+      "elapsed_seconds": 5.0,
       "capture_time": "2026-10-25T22:00:00",
-      "capture_timezone": null
+      "capture_timezone": null,
+      "lighting": "night"
     }
   ]
 }
@@ -141,7 +149,9 @@ evidence item. It has no claims or citations. Empty retrieval has
 `evidence_count: 0` and does not contact the answer service. The answer service is
 instructed to decline unrelated questions, avoid universal absence claims, and
 decline exact counts or visit-frequency questions that a limited crop set cannot
-establish.
+establish. Human-readable output includes the same filters, selected run and
+tagging fingerprints, evidence limit/count, per-item score labels, and image
+availability; unknown capture time is shown as unknown.
 
 ## Failure envelopes
 

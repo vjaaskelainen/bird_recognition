@@ -431,6 +431,21 @@ _ANSWER_SCHEMA = {
 }
 
 
+def build_search_request(request: AskRequest) -> SearchRequest:
+    """Translate an Ask request into the existing search contract."""
+    if not isinstance(request, AskRequest):
+        raise AskValidationError("ask request is invalid")
+    return SearchRequest(
+        query=request.question,
+        run_id=request.run_id,
+        start_date=request.start_date,
+        end_date=request.end_date,
+        lighting=request.lighting,
+        species_id=request.species_id,
+        limit=request.evidence_limit,
+    )
+
+
 def build_answer_input(
     request: AskRequest, evidence: tuple[EvidenceItem, ...]
 ) -> list[dict[str, object]]:
@@ -503,11 +518,7 @@ def execute_ask(
 
     if not isinstance(request, AskRequest):
         raise AskValidationError("ask request is invalid")
-    search_request = SearchRequest(
-        query=request.question,
-        run_id=request.run_id,
-        limit=request.evidence_limit,
-    )
+    search_request = build_search_request(request)
     search_outcome = execute_search(
         search_request,
         model,

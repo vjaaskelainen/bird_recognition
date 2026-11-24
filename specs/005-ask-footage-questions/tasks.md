@@ -85,14 +85,14 @@ description: "Task list for Ask Questions About Footage"
 
 ### Tests for User Story 3
 
-- [ ] T017 [P] [US3] Add offline tests for strict date bounds, day/night and species filters, filter-before-limit behavior, deterministic ordering, and unavailable images in `tests/unit/test_ask.py`
-- [ ] T018 [P] [US3] Add CLI parsing and rendering tests for filters, evidence limit/count, context fingerprints, per-item score labels, unknown capture time, and unavailable crop status in `tests/unit/test_cli_ask.py`
+- [X] T017 [P] [US3] Add offline tests for strict date bounds, day/night and species filters, filter-before-limit behavior, deterministic ordering, and unavailable images in `tests/unit/test_ask.py`
+- [X] T018 [P] [US3] Add CLI parsing and rendering tests for filters, evidence limit/count, context fingerprints, per-item score labels, unknown capture time, and unavailable crop status in `tests/unit/test_cli_ask.py`
 
 ### Implementation for User Story 3
 
-- [ ] T019 [US3] Build the existing `SearchRequest` from the question and explicit filters, preserving search's filter-before-limit and deterministic ranking semantics in `src/bird_recognition/ask.py`
-- [ ] T020 [US3] Render question, filters, evidence limit/count, run and tagging context, separately labeled similarity/species/detection confidence, and unavailable-image provenance in `src/bird_recognition/cli.py`
-- [ ] T021 [US3] Preserve the search contract's strict inclusive `YYYY-MM-DD` dates, exact `day`/`night` lighting, selected-context species ID or `unknown`, and positive whole-number evidence limit with default 5 in `src/bird_recognition/cli.py`
+- [X] T019 [US3] Build the existing `SearchRequest` from the question and explicit filters, preserving search's filter-before-limit and deterministic ranking semantics in `src/bird_recognition/ask.py`
+- [X] T020 [US3] Render question, filters, evidence limit/count, run and tagging context, separately labeled similarity/species/detection confidence, and unavailable-image provenance in `src/bird_recognition/cli.py`
+- [X] T021 [US3] Preserve the search contract's strict inclusive `YYYY-MM-DD` dates, exact `day`/`night` lighting, selected-context species ID or `unknown`, and positive whole-number evidence limit with default 5 in `src/bird_recognition/cli.py`
 
 **Checkpoint**: Every supplied filter constrains evidence before limiting; unchanged inputs yield the same selected evidence order.
 
