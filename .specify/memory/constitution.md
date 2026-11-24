@@ -31,7 +31,10 @@ database integration MUST include tests at the affected boundary.
 The CLI is the primary interface. Implementation MUST prioritize a complete local workflow
 from ingestion through search, grounded Q&A, and evaluation before optional UI work. The
 project MUST avoid authentication, multi-user support, cloud deployment, real-time
-streaming, and agent features unless the constitution is amended. Prefer the smallest
+streaming, and agent features unless the constitution is amended. The one permitted
+exception is an optional local HTTP service that is additive to the CLI, binds to
+loopback by default, and, only for non-loopback exposure, requires a single shared API
+key; it MUST NOT add accounts, roles, or multi-user support. Prefer the smallest
 implementation that demonstrates the project goals.
 
 ## Technical and Data Constraints
@@ -71,4 +74,4 @@ version. Compliance is reviewed during feature planning, implementation, and fin
 checks. Detailed coding conventions and agent workflow remain in `AGENTS.md` and linked
 guidance rather than being duplicated here.
 
-**Version**: 1.0.0 | **Ratified**: 2026-10-11 | **Last Amended**: 2026-10-11
+**Version**: 1.1.0 | **Ratified**: 2026-10-11 | **Last Amended**: 2026-11-24

@@ -23,6 +23,8 @@ dependencies = [
     # Required by PyTorch-Wildlife
     "soundfile",
     "librosa",
+    "fastapi>=0.115,<1",
+    "uvicorn>=0.30,<1",
 ]
 
 [project.scripts]
@@ -35,6 +37,8 @@ dev = [
     "ruff>=0.11",
     "copier>=9.10",
     "pytest>=9.1.1,<10",
+    "httpx>=0.27,<1",
+    "openapi-spec-validator>=0.7,<1",
 ]
 
 [tool.pytest.ini_options]
