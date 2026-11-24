@@ -347,6 +347,71 @@ def test_openai_adapter_sanitizes_service_errors(
     assert "test-key" not in str(exc.value)
 
 
+def test_openai_adapter_reports_timeout_without_disclosing_credentials(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class APITimeoutError(Exception):
+        pass
+
+    class Responses:
+        def create(self, **kwargs: object) -> SimpleNamespace:
+            raise APITimeoutError("request timed out with test-key")
+
+    class FakeOpenAI:
+        def __init__(self, **_: object) -> None:
+            self.responses = Responses()
+
+    monkeypatch.setitem(sys.modules, "openai", SimpleNamespace(OpenAI=FakeOpenAI))
+
+    with pytest.raises(AskOperationalError, match="timed out") as exc:
+        OpenAIAnswerClient(_request().service_config).generate(
+            "Which bird appears?", (_evidence(),)
+        )
+
+    assert "test-key" not in str(exc.value)
+
+
+@pytest.mark.parametrize(
+    ("response", "message"),
+    [
+        (
+            SimpleNamespace(status="incomplete", output_text="", output=[]),
+            "incomplete",
+        ),
+        (
+            SimpleNamespace(
+                status="completed",
+                output_text="",
+                output=[
+                    SimpleNamespace(
+                        type="message",
+                        content=[SimpleNamespace(type="refusal")],
+                    )
+                ],
+            ),
+            "refused",
+        ),
+    ],
+)
+def test_openai_adapter_reports_refusal_and_incomplete_responses(
+    monkeypatch: pytest.MonkeyPatch, response: SimpleNamespace, message: str
+) -> None:
+    class Responses:
+        def create(self, **kwargs: object) -> SimpleNamespace:
+            return response
+
+    class FakeOpenAI:
+        def __init__(self, **_: object) -> None:
+            self.responses = Responses()
+
+    monkeypatch.setitem(sys.modules, "openai", SimpleNamespace(OpenAI=FakeOpenAI))
+
+    with pytest.raises(AskOperationalError, match=message):
+        OpenAIAnswerClient(_request().service_config).generate(
+            "Which bird appears?", (_evidence(),)
+        )
+
+
 def test_execute_ask_resolves_valid_claim_indices_to_selected_provenance(
     tmp_path: Path,
 ) -> None:
@@ -665,13 +730,103 @@ def test_execute_ask_does_not_call_answer_client_when_search_is_empty() -> None:
     store = SimpleNamespace(load_search_collection=lambda _: (context, ()))
     client = _AnswerClient("{}")
 
-    outcome = execute_ask(request, model, store, client)
+    notice_calls: list[tuple[EvidenceItem, ...]] = []
+    outcome = execute_ask(
+        request,
+        model,
+        store,
+        client,
+        before_answer=notice_calls.append,
+    )
 
     assert outcome.status is AskOutcomeStatus.INSUFFICIENT_EVIDENCE
     assert outcome.evidence == ()
     assert outcome.claims == ()
     assert outcome.reason
     assert client.calls == []
+    assert notice_calls == []
+
+
+def test_execute_ask_notifies_before_sending_only_selected_evidence(
+    tmp_path: Path,
+) -> None:
+    request = replace(_request(), evidence_limit=1)
+    context = _search_context(("crop-1", "crop-2"))
+    crop_path = tmp_path / "missing.png"
+    candidate = SearchCandidate(
+        result=_search_result(crop_path),
+        embedding=(1.0,) + (0.0,) * 511,
+    )
+    second_candidate = SearchCandidate(
+        result=replace(_search_result(crop_path), crop_id="crop-2"),
+        embedding=(1.0,) + (0.0,) * 511,
+    )
+    model = SimpleNamespace(
+        identity=SimpleNamespace(model_fingerprint=context.model_fingerprint),
+        encode_texts=lambda _: ((1.0,) + (0.0,) * 511,),
+    )
+    store = SimpleNamespace(
+        load_search_collection=lambda _: (context, (candidate, second_candidate))
+    )
+    events: list[str] = []
+    notified_evidence: list[tuple[EvidenceItem, ...]] = []
+
+    class OrderedAnswerClient:
+        def generate(self, question: str, evidence: tuple[EvidenceItem, ...]) -> str:
+            events.append("answer service")
+            assert question == request.question
+            assert len(evidence) == 1
+            assert evidence[0].image_status == "unavailable"
+            assert evidence[0].image_bytes is None
+            return json.dumps(
+                {
+                    "sufficient_evidence": False,
+                    "answer": None,
+                    "insufficient_reason": "The image is unavailable.",
+                    "claims": [],
+                }
+            )
+
+    def announce(evidence: tuple[EvidenceItem, ...]) -> None:
+        events.append("transmission notice")
+        notified_evidence.append(evidence)
+
+    outcome = execute_ask(
+        request,
+        model,
+        store,
+        OrderedAnswerClient(),
+        before_answer=announce,
+    )
+
+    assert outcome.status is AskOutcomeStatus.INSUFFICIENT_EVIDENCE
+    assert events == ["transmission notice", "answer service"]
+    assert len(notified_evidence) == 1
+    assert notified_evidence[0][0].evidence_index == 0
+    assert notified_evidence[0][0].crop_id == "crop-1"
+    assert notified_evidence[0][0].image_status == "unavailable"
+
+
+@pytest.mark.parametrize("response_text", ["not-json", "{}"])
+def test_execute_ask_classifies_malformed_responses_as_operational(
+    tmp_path: Path, response_text: str
+) -> None:
+    request = _request()
+    context = _search_context()
+    crop_path = tmp_path / "crop.png"
+    crop_path.write_bytes(b"\x89PNG\r\n\x1a\ncrop-image")
+    candidate = SearchCandidate(
+        result=_search_result(crop_path),
+        embedding=(1.0,) + (0.0,) * 511,
+    )
+    model = SimpleNamespace(
+        identity=SimpleNamespace(model_fingerprint=context.model_fingerprint),
+        encode_texts=lambda _: ((1.0,) + (0.0,) * 511,),
+    )
+    store = SimpleNamespace(load_search_collection=lambda _: (context, (candidate,)))
+
+    with pytest.raises(AskOperationalError, match="malformed structured output"):
+        execute_ask(request, model, store, _AnswerClient(response_text))
 
 
 def test_execute_ask_drops_claims_when_answer_client_declines(

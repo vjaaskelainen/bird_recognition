@@ -1,9 +1,8 @@
 # CLI Contract: Ask Questions About Footage
 
-**Status**: User Stories 1, 2, and 3 are implemented. Transmission notices and
-additional operational safeguards remain planned for User Story 4. The command
-accepts `QUESTION`, `--run-id`, `--limit`, optional date/lighting/species filters,
-`--database-url`, `--model-dir`, and `--json`. See
+**Status**: User Stories 1-4 are implemented. The command accepts `QUESTION`,
+`--run-id`, `--limit`, optional date/lighting/species filters, `--database-url`,
+`--model-dir`, and `--json`. See
 [data model](../data-model.md) for request/outcome semantics and
 [quickstart](../quickstart.md) for validation.
 
@@ -59,20 +58,21 @@ For regular non-secret settings, explicit CLI options take precedence over
 process environment, `.env`, then defaults. The answer key has no CLI option and
 must never appear in JSON, logs, prompts, or error messages.
 
-Immediately before sending a nonempty selected evidence set, the command states
-that the selected crops (when available) and their selected metadata will be sent
-to the configured external answer service. Only selected crops and their
-metadata may be transmitted. Full videos, unselected crops, and excluded frames
-are never sent. In JSON mode, the transmission notice is written to stderr so
-stdout remains one versioned JSON envelope.
+Immediately before sending a nonempty selected evidence set, the command writes
+a notice to stderr stating that the question and selected evidence will be sent,
+naming selected crop IDs and indicating which images are available. Only
+selected crop images when available and their metadata are sent to the
+configured external answer service; unavailable images contribute metadata
+only. Full videos, unselected crops, and excluded frames are never sent. In JSON
+mode, the notice remains on stderr so stdout is one versioned JSON envelope.
 
 ## Outcomes and exit codes
 
 - `0`: supported answer or successful insufficient-evidence decline.
 - `1`: operational failure such as unavailable storage/model/service, timeout,
   refused/incomplete response, or malformed service output.
-- `2`: invalid question, filter, evidence limit, run/context selection, missing
-  credentials, or local preflight failure.
+- `2`: invalid question, filter, evidence limit, run/context selection, or
+  missing required configuration such as credentials.
 
 Supported answers include the question, applied filters, evidence limit/count,
 selected collection and tagging context, each claim and its validated citations,
@@ -155,13 +155,13 @@ availability; unknown capture time is shown as unknown.
 
 ## Failure envelopes
 
-Input/preflight failure (exit 2):
+Input error (exit 2):
 
 ```json
 {"schema_version":1,"status":"input_error","code":"invalid_question","message":"actionable sanitized explanation"}
 ```
 
-Operational failure (exit 1):
+Operational failure (exit 1), including local resource failures:
 
 ```json
 {"schema_version":1,"status":"operational_failure","message":"actionable sanitized explanation"}

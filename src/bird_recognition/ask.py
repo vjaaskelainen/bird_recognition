@@ -6,6 +6,7 @@ import base64
 import json
 import math
 import re
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import date
 from enum import StrEnum
@@ -355,9 +356,9 @@ class OpenAIAnswerClient:
         self._configuration = configuration
 
     def generate(self, question: str, evidence: tuple[EvidenceItem, ...]) -> str:
-        from openai import OpenAI
-
         try:
+            from openai import OpenAI
+
             client = OpenAI(
                 api_key=self._configuration.api_key,
                 timeout=self._configuration.timeout_seconds,
@@ -376,14 +377,39 @@ class OpenAIAnswerClient:
                 },
                 timeout=self._configuration.timeout_seconds,
             )
+            status = getattr(response, "status", None)
+            if status == "incomplete":
+                raise AskOperationalError("answer service response was incomplete")
+            if status is not None and status != "completed":
+                raise AskOperationalError("answer service response did not complete")
+            if _response_was_refused(response):
+                raise AskOperationalError("answer service refused the request")
             output = response.output_text
+            if not isinstance(output, str) or not output.strip():
+                raise AskOperationalError(
+                    "answer service returned no structured output"
+                )
         except AskOperationalError:
             raise
-        except Exception:
+        except Exception as error:
+            if isinstance(error, TimeoutError) or type(error).__name__ in {
+                "APITimeoutError",
+                "TimeoutError",
+            }:
+                raise AskOperationalError("answer service request timed out") from None
             raise AskOperationalError("answer service request failed") from None
-        if not isinstance(output, str) or not output.strip():
-            raise AskOperationalError("answer service returned no structured output")
         return output
+
+
+def _response_was_refused(response: object) -> bool:
+    """Detect a Responses API refusal without exposing its contents."""
+    for item in getattr(response, "output", ()):
+        if any(
+            getattr(content, "type", None) == "refusal"
+            for content in getattr(item, "content", ())
+        ):
+            return True
+    return False
 
 
 _SYSTEM_PROMPT = (
@@ -512,6 +538,7 @@ def execute_ask(
     *,
     context: SearchContext | None = None,
     candidates: tuple[SearchCandidate, ...] | None = None,
+    before_answer: Callable[[tuple[EvidenceItem, ...]], None] | None = None,
 ) -> AskOutcome:
     """Retrieve selected crops, generate structured claims, and resolve citations."""
     from bird_recognition.embed.search import execute_search
@@ -540,6 +567,8 @@ def execute_ask(
         )
 
     client = answer_client or OpenAIAnswerClient(request.service_config)
+    if before_answer is not None:
+        before_answer(evidence)
     response_text = client.generate(request.question, evidence)
     response = _decode_answer_response(response_text)
     if not response["sufficient_evidence"]:

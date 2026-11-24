@@ -11,6 +11,7 @@ from uuid import UUID
 import pytest
 
 from bird_recognition.ask import (
+    AskOperationalError,
     AskOutcome,
     AskOutcomeStatus,
     AskRequest,
@@ -24,8 +25,13 @@ from bird_recognition.cli import (
     _render_ask_outcome,
     main,
 )
-from bird_recognition.embed.config import AskServiceConfiguration
-from bird_recognition.embed.models import Lighting, SearchContext, SearchRequest
+from bird_recognition.embed.config import AskServiceConfiguration, EmbedValidationError
+from bird_recognition.embed.models import (
+    Lighting,
+    PreflightError,
+    SearchContext,
+    SearchRequest,
+)
 
 
 def _outcome() -> AskOutcome:
@@ -368,3 +374,305 @@ def test_ask_dispatch_returns_success_for_supported_or_declined_result(
     assert ask_calls[0].lighting is Lighting.NIGHT
     assert ask_calls[0].species_id == "bird"
     assert ask_calls[0].evidence_limit == 2
+
+
+@pytest.mark.parametrize(
+    ("question", "options"),
+    [
+        (" ", ()),
+        ("Which bird appears?", ("--limit", "0")),
+        (
+            "Which bird appears?",
+            ("--start-date", "2026-10-27", "--end-date", "2026-10-26"),
+        ),
+    ],
+)
+def test_ask_json_reports_invalid_input_before_opening_resources(
+    question: str, options: tuple[str, ...], monkeypatch, capsys
+) -> None:
+    monkeypatch.setenv("BIRD_RECOGNITION_ASK_API_KEY", "test-key")
+    monkeypatch.setattr("bird_recognition.cli.find_dotenv", lambda **_: "")
+    monkeypatch.setattr("bird_recognition.cli.dotenv_values", lambda _: {})
+    monkeypatch.setitem(
+        sys.modules,
+        "bird_recognition.embed.storage",
+        SimpleNamespace(
+            PgVectorStore=lambda *_: pytest.fail("storage opened before validation"),
+            initialize_database=lambda _: None,
+        ),
+    )
+
+    exit_code = main(
+        [
+            "ask",
+            question,
+            "--run-id",
+            "00000000-0000-0000-0000-000000000001",
+            "--database-url",
+            "postgresql://bird@localhost/bird",
+            "--model-dir",
+            "models",
+            *options,
+            "--json",
+        ]
+    )
+
+    assert exit_code == 2
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["status"] == "input_error"
+    assert payload["code"] == "invalid_request"
+    assert "test-key" not in json.dumps(payload)
+
+
+def test_ask_json_reports_missing_credentials_before_opening_resources(
+    monkeypatch, capsys
+) -> None:
+    monkeypatch.delenv("BIRD_RECOGNITION_ASK_API_KEY", raising=False)
+    monkeypatch.setattr("bird_recognition.cli.find_dotenv", lambda **_: "")
+    monkeypatch.setattr("bird_recognition.cli.dotenv_values", lambda _: {})
+    monkeypatch.setitem(
+        sys.modules,
+        "bird_recognition.embed.storage",
+        SimpleNamespace(
+            PgVectorStore=lambda *_: pytest.fail("storage opened before credentials"),
+            initialize_database=lambda _: None,
+        ),
+    )
+
+    exit_code = main(
+        [
+            "ask",
+            "Which bird appears?",
+            "--run-id",
+            "00000000-0000-0000-0000-000000000001",
+            "--database-url",
+            "postgresql://bird@localhost/bird",
+            "--model-dir",
+            "models",
+            "--json",
+        ]
+    )
+
+    assert exit_code == 2
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["status"] == "input_error"
+    assert payload["code"] == "invalid_request"
+    assert "ask API key is required" in payload["message"]
+
+
+def test_ask_json_emits_transmission_notice_to_stderr(monkeypatch, capsys) -> None:
+    outcome = _outcome()
+    monkeypatch.setenv("BIRD_RECOGNITION_ASK_API_KEY", "test-key")
+    monkeypatch.setattr("bird_recognition.cli.find_dotenv", lambda **_: "")
+    monkeypatch.setattr("bird_recognition.cli.dotenv_values", lambda _: {})
+
+    class FakeStore:
+        def __init__(self, database_url: str) -> None:
+            pass
+
+        def preflight(self, *, read_only: bool = False) -> None:
+            pass
+
+        def load_search_collection(self, request: object):
+            return outcome.context, ()
+
+        def close(self) -> None:
+            pass
+
+    def fake_execute_ask(request, model, store, **kwargs):
+        kwargs["before_answer"](outcome.evidence)
+        return outcome
+
+    monkeypatch.setitem(
+        sys.modules,
+        "bird_recognition.embed.storage",
+        SimpleNamespace(PgVectorStore=FakeStore, initialize_database=lambda _: None),
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "bird_recognition.embed.bioclip",
+        SimpleNamespace(load_bioclip=lambda *_args, **_kwargs: object()),
+    )
+    monkeypatch.setattr("bird_recognition.ask.execute_ask", fake_execute_ask)
+
+    exit_code = main(
+        [
+            "ask",
+            "Which bird appears?",
+            "--run-id",
+            "00000000-0000-0000-0000-000000000001",
+            "--database-url",
+            "postgresql://bird@localhost/bird",
+            "--model-dir",
+            "models",
+            "--json",
+        ]
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code == 0
+    assert json.loads(captured.out)["status"] == "answered"
+    assert "the question" in captured.err
+    assert "crop-1" in captured.err
+    assert "selected metadata" in captured.err
+    assert "external answer service" in captured.err
+    assert "Full source videos" in captured.err
+
+
+def test_ask_json_reports_sanitized_operational_failure_and_exit_code(
+    monkeypatch, capsys
+) -> None:
+    outcome = _outcome()
+    monkeypatch.setenv("BIRD_RECOGNITION_ASK_API_KEY", "test-key")
+    monkeypatch.setattr("bird_recognition.cli.find_dotenv", lambda **_: "")
+    monkeypatch.setattr("bird_recognition.cli.dotenv_values", lambda _: {})
+
+    class FakeStore:
+        def __init__(self, database_url: str) -> None:
+            pass
+
+        def preflight(self, *, read_only: bool = False) -> None:
+            pass
+
+        def load_search_collection(self, request: object):
+            return outcome.context, ()
+
+        def close(self) -> None:
+            pass
+
+    def fail_ask(*_args, **_kwargs):
+        raise AskOperationalError("answer service timed out with test-key")
+
+    monkeypatch.setitem(
+        sys.modules,
+        "bird_recognition.embed.storage",
+        SimpleNamespace(PgVectorStore=FakeStore, initialize_database=lambda _: None),
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "bird_recognition.embed.bioclip",
+        SimpleNamespace(load_bioclip=lambda *_args, **_kwargs: object()),
+    )
+    monkeypatch.setattr("bird_recognition.ask.execute_ask", fail_ask)
+
+    exit_code = main(
+        [
+            "ask",
+            "Which bird appears?",
+            "--run-id",
+            "00000000-0000-0000-0000-000000000001",
+            "--database-url",
+            "postgresql://bird@localhost/bird",
+            "--model-dir",
+            "models",
+            "--json",
+        ]
+    )
+
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+    assert exit_code == 1
+    assert payload["status"] == "operational_failure"
+    assert "test-key" not in captured.out
+    assert "test-key" not in payload["message"]
+
+
+def test_ask_json_classifies_unavailable_model_resources_as_operational(
+    monkeypatch, capsys
+) -> None:
+    outcome = _outcome()
+    monkeypatch.setenv("BIRD_RECOGNITION_ASK_API_KEY", "test-key")
+    monkeypatch.setattr("bird_recognition.cli.find_dotenv", lambda **_: "")
+    monkeypatch.setattr("bird_recognition.cli.dotenv_values", lambda _: {})
+
+    class FakeStore:
+        def __init__(self, database_url: str) -> None:
+            pass
+
+        def preflight(self, *, read_only: bool = False) -> None:
+            pass
+
+        def load_search_collection(self, request: object):
+            return outcome.context, ()
+
+        def close(self) -> None:
+            pass
+
+    def fail_model(*_args, **_kwargs):
+        raise EmbedValidationError("BioCLIP asset directory is unavailable")
+
+    monkeypatch.setitem(
+        sys.modules,
+        "bird_recognition.embed.storage",
+        SimpleNamespace(PgVectorStore=FakeStore, initialize_database=lambda _: None),
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "bird_recognition.embed.bioclip",
+        SimpleNamespace(load_bioclip=fail_model),
+    )
+    monkeypatch.setattr(
+        "bird_recognition.ask.execute_ask",
+        lambda *_args, **_kwargs: pytest.fail("answer service called before model"),
+    )
+
+    exit_code = main(
+        [
+            "ask",
+            "Which bird appears?",
+            "--run-id",
+            "00000000-0000-0000-0000-000000000001",
+            "--database-url",
+            "postgresql://bird@localhost/bird",
+            "--model-dir",
+            "models",
+            "--json",
+        ]
+    )
+
+    payload = json.loads(capsys.readouterr().out)
+    assert exit_code == 1
+    assert payload["status"] == "operational_failure"
+    assert "model resources" in payload["message"]
+
+
+def test_ask_json_classifies_database_preflight_as_operational(
+    monkeypatch, capsys
+) -> None:
+    monkeypatch.setenv("BIRD_RECOGNITION_ASK_API_KEY", "test-key")
+    monkeypatch.setattr("bird_recognition.cli.find_dotenv", lambda **_: "")
+    monkeypatch.setattr("bird_recognition.cli.dotenv_values", lambda _: {})
+
+    class FakeStore:
+        def __init__(self, database_url: str) -> None:
+            pass
+
+        def preflight(self, *, read_only: bool = False) -> None:
+            raise PreflightError("database unavailable")
+
+        def close(self) -> None:
+            pass
+
+    monkeypatch.setitem(
+        sys.modules,
+        "bird_recognition.embed.storage",
+        SimpleNamespace(PgVectorStore=FakeStore, initialize_database=lambda _: None),
+    )
+
+    exit_code = main(
+        [
+            "ask",
+            "Which bird appears?",
+            "--run-id",
+            "00000000-0000-0000-0000-000000000001",
+            "--database-url",
+            "postgresql://bird@localhost/bird",
+            "--model-dir",
+            "models",
+            "--json",
+        ]
+    )
+
+    payload = json.loads(capsys.readouterr().out)
+    assert exit_code == 1
+    assert payload["status"] == "operational_failure"

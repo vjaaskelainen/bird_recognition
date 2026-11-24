@@ -106,15 +106,15 @@ description: "Task list for Ask Questions About Footage"
 
 ### Tests for User Story 4
 
-- [ ] T022 [P] [US4] Add offline tests for blank input, invalid filters/limits, credential preflight, unavailable images, timeout, refusal, incomplete/malformed responses, and secret sanitization in `tests/unit/test_ask.py`
-- [ ] T023 [P] [US4] Add CLI tests for input-error and operational-failure JSON envelopes, exit codes, and transmission notices to stderr in JSON mode in `tests/unit/test_cli_ask.py`
+- [X] T022 [P] [US4] Add offline tests for blank input, invalid filters/limits, credential preflight, unavailable images, timeout, refusal, incomplete/malformed responses, and secret sanitization in `tests/unit/test_ask.py`
+- [X] T023 [P] [US4] Add CLI tests for input-error and operational-failure JSON envelopes, exit codes, and transmission notices to stderr in JSON mode in `tests/unit/test_cli_ask.py`
 
 ### Implementation for User Story 4
 
-- [ ] T024 [US4] Validate the question, filters, limit, credentials, run context, and local resources before external service invocation in `src/bird_recognition/ask.py`
-- [ ] T025 [US4] Classify input errors, operational failures, and declines separately and sanitize service, storage, and configuration errors in `src/bird_recognition/ask.py`
-- [ ] T026 [US4] Emit the selected-crops-and-metadata transmission notice before service calls and ensure only limited selected evidence is serialized to the answer service in `src/bird_recognition/cli.py`
-- [ ] T027 [US4] Document prerequisites, credential setup, filters, limits, outcomes, citation meaning, external transmission, and known limitations in `docs/usage.md`
+- [X] T024 [US4] Validate the question, filters, limit, credentials, run context, and local resources before external service invocation in `src/bird_recognition/ask.py`
+- [X] T025 [US4] Classify input errors, operational failures, and declines separately and sanitize service, storage, and configuration errors in `src/bird_recognition/ask.py`
+- [X] T026 [US4] Emit the selected-crops-and-metadata transmission notice before service calls and ensure only limited selected evidence is serialized to the answer service in `src/bird_recognition/cli.py`
+- [X] T027 [US4] Document prerequisites, credential setup, filters, limits, outcomes, citation meaning, external transmission, and known limitations in `docs/usage.md`
 
 **Checkpoint**: No input/preflight failure sends data; service failures are actionable and distinct from declines, with no credential disclosure.
 

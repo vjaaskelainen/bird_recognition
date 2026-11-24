@@ -627,6 +627,7 @@ def _dispatch_embed_command(arguments: argparse.Namespace) -> int:
     )
     from bird_recognition.embed.storage import PgVectorStore, initialize_database
 
+    ask_api_key: str | None = None
     try:
         dotenv_path = find_dotenv(usecwd=True)
         dotenv_environment = dotenv_values(dotenv_path) if dotenv_path else {}
@@ -644,6 +645,7 @@ def _dispatch_embed_command(arguments: argparse.Namespace) -> int:
         arguments.database_url = resolved["database_url"]
         if arguments.command == "ask":
             from bird_recognition.ask import (
+                AskOperationalError,
                 AskRequest,
                 build_search_request,
                 execute_ask,
@@ -655,6 +657,7 @@ def _dispatch_embed_command(arguments: argparse.Namespace) -> int:
                 process_environment=os.environ,
                 dotenv_environment=dotenv_environment,
             )
+            ask_api_key = service_configuration.api_key
             request = AskRequest(
                 question=arguments.question,
                 run_id=UUID(arguments.run_id),
@@ -679,16 +682,22 @@ def _dispatch_embed_command(arguments: argparse.Namespace) -> int:
                 except StorageError as error:
                     raise PreflightError(str(error)) from None
                 context, candidates = store.load_search_collection(search_request)
-                model = load_bioclip(
-                    Path(resolved["model_dir"]),
-                    input_view=context.model_input_view,
-                )
+                try:
+                    model = load_bioclip(
+                        Path(resolved["model_dir"]),
+                        input_view=context.model_input_view,
+                    )
+                except EmbedValidationError:
+                    raise AskOperationalError(
+                        "local BioCLIP model resources are unavailable or invalid"
+                    ) from None
                 outcome = execute_ask(
                     request,
                     model,
                     store,
                     context=context,
                     candidates=candidates,
+                    before_answer=_render_ask_transmission_notice,
                 )
             _render_ask_outcome(outcome, json_output=arguments.json)
             return 0
@@ -1033,6 +1042,22 @@ def _dispatch_embed_command(arguments: argparse.Namespace) -> int:
             return 1
         return 0
     except (EmbedValidationError, ValueError, OSError) as error:
+        if arguments.command == "ask" and isinstance(error, OSError):
+            message = _sanitize_ask_error(str(error), ask_api_key)
+            if arguments.json:
+                print(
+                    json.dumps(
+                        {
+                            "schema_version": 1,
+                            "status": "operational_failure",
+                            "message": message,
+                        },
+                        sort_keys=True,
+                    )
+                )
+            else:
+                print(f"Ask operation failed: {message}", file=sys.stderr)
+            return 1
         if arguments.json:
             if arguments.command == "ask":
                 print(
@@ -1041,7 +1066,7 @@ def _dispatch_embed_command(arguments: argparse.Namespace) -> int:
                             "schema_version": 1,
                             "status": "input_error",
                             "code": "invalid_request",
-                            "message": sanitize_error(str(error)),
+                            "message": _sanitize_ask_error(str(error), ask_api_key),
                         },
                         sort_keys=True,
                     )
@@ -1065,17 +1090,20 @@ def _dispatch_embed_command(arguments: argparse.Namespace) -> int:
             label = (
                 "Ask input error" if arguments.command == "ask" else "Preflight error"
             )
-            print(f"{label}: {sanitize_error(str(error))}", file=sys.stderr)
+            message = (
+                _sanitize_ask_error(str(error), ask_api_key)
+                if arguments.command == "ask"
+                else sanitize_error(str(error))
+            )
+            print(f"{label}: {message}", file=sys.stderr)
         return 2
     except EmbedError as error:
         if arguments.command == "ask":
-            from bird_recognition.ask import AskOperationalError
-
             input_failure = not isinstance(error, AskOperationalError) and isinstance(
-                error, (PreflightError, SearchValidationError)
+                error, SearchValidationError
             )
             status = "input_error" if input_failure else "operational_failure"
-            message = sanitize_error(str(error))
+            message = _sanitize_ask_error(str(error), ask_api_key)
             if arguments.json:
                 failure: dict[str, object] = {
                     "schema_version": 1,
@@ -1135,7 +1163,10 @@ def _dispatch_embed_command(arguments: argparse.Namespace) -> int:
             print(f"{label}: {sanitize_error(str(error))}", file=sys.stderr)
         return 2 if is_preflight else 1
     except Exception as error:
-        sanitized = sanitize_error(str(error))
+        if arguments.command == "ask":
+            sanitized = _sanitize_ask_error(str(error), ask_api_key)
+        else:
+            sanitized = sanitize_error(str(error))
         if arguments.json:
             print(
                 json.dumps(
@@ -1148,8 +1179,40 @@ def _dispatch_embed_command(arguments: argparse.Namespace) -> int:
                 )
             )
         else:
-            print(f"Embedding operation failed: {sanitized}", file=sys.stderr)
+            label = (
+                "Ask operation failed"
+                if arguments.command == "ask"
+                else "Embedding operation failed"
+            )
+            print(f"{label}: {sanitized}", file=sys.stderr)
         return 1
+
+
+def _sanitize_ask_error(message: str, api_key: str | None) -> str:
+    from bird_recognition.embed.config import sanitize_error
+
+    sanitized = sanitize_error(message)
+    if api_key:
+        sanitized = sanitized.replace(api_key, "[credential redacted]")
+    return sanitized
+
+
+def _render_ask_transmission_notice(evidence: tuple[object, ...]) -> None:
+    """Disclose the exact selected images and metadata before service invocation."""
+    items = ", ".join(
+        (
+            f"{item.crop_id} ("
+            f"{'image and selected metadata' if item.image_bytes else 'metadata only'})"
+        )
+        for item in evidence
+    )
+    print(
+        "Transmission notice: the question and selected evidence will be sent to "
+        "the configured external "
+        f"answer service: {items}. Full source videos and unselected crops "
+        "are not sent.",
+        file=sys.stderr,
+    )
 
 
 def _preflight_code(error: Exception) -> str:

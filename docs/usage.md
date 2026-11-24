@@ -322,6 +322,53 @@ See the [search CLI contract](../specs/003-search-crops/contracts/cli.md) and
 [search quickstart](../specs/003-search-crops/quickstart.md) for output fields and
 validation scenarios.
 
+## Ask questions about indexed footage
+
+The `ask` command selects evidence from one complete indexed run using the same
+local database, BioCLIP assets, and search filters as `search`. Configure
+`BIRD_RECOGNITION_ASK_API_KEY` privately in the process environment or ignored
+`.env`; optionally set `BIRD_RECOGNITION_ASK_MODEL` (default
+`gpt-4o-mini`). The key has no CLI option and is never included in the prompt or
+output. Keep database credentials, models, crops, and footage private.
+
+```powershell
+.\.venv\Scripts\uv.exe run bird-recognition ask `
+  "Which birds appear at night?" `
+  --run-id "<completed-index-run-uuid>" `
+  --start-date 2026-10-01 `
+  --end-date 2026-10-31 `
+  --lighting night `
+  --limit 5 `
+  --json
+```
+
+The question must be nonblank. Optional inclusive date bounds, exact `day` or
+`night` lighting, and a selected-run species ID or `unknown` filter apply before
+the evidence limit, which defaults to five. Question wording does not create
+filters. The command needs a compatible indexed run, available local database
+and BioCLIP resources, and the answer-service credential. Empty retrieval is a
+successful decline and makes no service request.
+
+Before any request with selected evidence, the command writes a transmission
+notice to stderr stating that the question and selected evidence will be sent,
+naming the selected crop IDs and indicating which crop images are available.
+It sends only those selected crops when readable and their selected metadata to
+the configured external answer service; an unavailable image contributes
+metadata only. It never sends full source videos or unselected crops. In JSON
+mode, stdout remains a single versioned envelope and the notice stays on
+stderr. Do not run `ask` unless this external transfer is acceptable.
+
+Exit `0` means a supported answer or an insufficient-evidence decline; exit `2`
+means invalid input, missing required configuration, or invalid run/context
+selection; exit `1` means an operational failure such as unavailable storage or
+model resources, service refusal, timeout, or incomplete/malformed output.
+Supported claims cite request-local selected evidence resolved to crop, source
+video, frame, and known capture time. Similarity and species suggestions are
+not proof. A limited crop set cannot establish universal absence, exact counts,
+or visit frequency, and near-duplicate frames are not independent sightings.
+See the [Ask CLI contract](../specs/005-ask-footage-questions/contracts/cli.md)
+and [acceptance quickstart](../specs/005-ask-footage-questions/quickstart.md).
+
 ### Optional text-search quality evaluation
 
 Do not claim retrieval quality from controlled tests or unreviewed output. Before
