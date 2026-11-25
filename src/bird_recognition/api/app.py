@@ -10,9 +10,23 @@ from fastapi import FastAPI
 from bird_recognition.api.errors import install_error_handlers
 from bird_recognition.api.jobs import JobManager
 from bird_recognition.api.resources import APIResources
-from bird_recognition.api.routers import ask, crops, health, jobs, runs, search, visits
+from bird_recognition.api.routers import (
+    ask,
+    crops,
+    health,
+    jobs,
+    media,
+    reviews,
+    runs,
+    search,
+    session,
+    videos,
+    visits,
+)
 from bird_recognition.api.security import validate_bind
+from bird_recognition.api.sessions import SessionStore
 from bird_recognition.api.settings import APISettings, load_settings
+from bird_recognition.api.ui import mount_ui
 
 _DESCRIPTION = (
     "Bird-recognition HTTP API. Species confidence and search similarity are not "
@@ -28,6 +42,7 @@ def create_app(
     model_loader: Any = None,
     ask_executor: Any = None,
     job_manager: Any = None,
+    review_store_factory: Any = None,
 ) -> FastAPI:
     """Create the versioned API without opening the database or loading models."""
     resolved_settings = settings or load_settings()
@@ -40,6 +55,7 @@ def create_app(
         model_loader=model_loader,
         ask_executor=ask_executor,
         job_manager=job_manager,
+        review_store_factory=review_store_factory,
     )
 
     @asynccontextmanager
@@ -59,12 +75,18 @@ def create_app(
     )
     app.state.settings = resolved_settings
     app.state.resources = resources
+    app.state.sessions = SessionStore()
     install_error_handlers(app)
     app.include_router(health.router, prefix="/v1")
+    app.include_router(session.router, prefix="/v1")
     app.include_router(search.router, prefix="/v1")
     app.include_router(crops.router, prefix="/v1")
     app.include_router(runs.router, prefix="/v1")
     app.include_router(visits.router, prefix="/v1")
     app.include_router(ask.router, prefix="/v1")
     app.include_router(jobs.router, prefix="/v1")
+    app.include_router(videos.router, prefix="/v1")
+    app.include_router(reviews.router, prefix="/v1")
+    app.include_router(media.router, prefix="/v1")
+    mount_ui(app, resolved_settings.ui_dir)
     return app

@@ -21,6 +21,12 @@ class APISettings:
     allowed_roots: tuple[Path, ...] = ()
     database_url: str | None = None
     model_dir: Path | None = None
+    manifest: Path | None = None
+    cache_dir: Path | None = None
+    ui_dir: Path | None = None
+    ffmpeg: str | None = None
+    interval: float = 1.0
+    animal_threshold: float = 0.2
 
 
 def load_settings(
@@ -101,7 +107,36 @@ def load_settings(
         allowed_roots=allowed_roots,
         database_url=database_url,
         model_dir=model_dir,
+        manifest=_optional_path(value("MANIFEST", "manifest")),
+        cache_dir=_optional_path(value("CACHE_DIR", "cache_dir")),
+        ui_dir=_optional_path(value("UI_DIR", "ui_dir")),
+        ffmpeg=_optional_string(
+            _environment_value(
+                "BIRD_RECOGNITION_FFMPEG", process_values, dotenv_values_map
+            )
+        ),
+        interval=_float_setting(
+            "BIRD_RECOGNITION_INTERVAL", 1.0, process_values, dotenv_values_map
+        ),
+        animal_threshold=_float_setting(
+            "BIRD_RECOGNITION_ANIMAL_THRESHOLD", 0.2, process_values, dotenv_values_map
+        ),
     )
+
+
+def _float_setting(
+    name: str,
+    default: float,
+    process_values: Mapping[str, str | None],
+    dotenv_values_map: Mapping[str, str | None],
+) -> float:
+    raw = _environment_value(name, process_values, dotenv_values_map)
+    if raw is None or not raw.strip():
+        return default
+    try:
+        return float(raw)
+    except ValueError:
+        raise ValueError(f"{name} must be a number") from None
 
 
 def _environment_value(

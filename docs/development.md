@@ -91,6 +91,27 @@ After changing an API route or schema, regenerate
 `docs/api/openapi.json` with `bird-recognition-api export-openapi` and ensure
 the check passes. The full unit suite includes the OpenAPI validator.
 
+## Frontend (web UI)
+
+The UI lives in `frontend/` (React, TypeScript, Vite; Node version in
+`frontend/.nvmrc`, `>=24`). Run commands from `frontend/`:
+
+```powershell
+npm ci
+npm run dev          # Vite on :5173, proxies /v1 to 127.0.0.1:8000
+npm run lint
+npm run typecheck
+npm test
+npm run build        # writes frontend/dist, served by the API
+npm run e2e          # Playwright smoke test against a stub server
+```
+
+The typed client in `frontend/src/api/schema.d.ts` is generated from
+`docs/api/openapi.json`. After an API change run
+`bird-recognition-api export-openapi`, then `npm run api:generate`; CI fails on
+drift (`npm run api:check`). Playwright needs a browser
+(`npx playwright install chromium`).
+
 ## Lint, format, and pre-commit
 
 Run Ruff and the configured pre-commit hooks through the project environment:

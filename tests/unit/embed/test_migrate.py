@@ -19,11 +19,12 @@ def test_discover_migrations_orders_contiguous_revisions(tmp_path: Path) -> None
     assert [migration.version for migration in migrations] == [1, 2, 3]
 
 
-def test_packaged_margin_migration_is_the_next_contiguous_revision() -> None:
+def test_packaged_review_migration_is_the_next_contiguous_revision() -> None:
     migrations = discover_migrations()
 
-    assert latest_migration_version() == 4
-    assert migrations[-1].resource.name == "004_score_margin.sql"
+    assert latest_migration_version() == 5
+    assert migrations[3].resource.name == "004_score_margin.sql"
+    assert migrations[-1].resource.name == "005_video_review.sql"
 
 
 @pytest.mark.parametrize(

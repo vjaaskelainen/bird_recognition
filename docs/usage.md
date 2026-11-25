@@ -406,6 +406,41 @@ Inspection/search results otherwise match the CLI payloads and may include local
 provenance paths; keep the service on loopback or protect LAN access with the
 shared API key.
 
+### Owner review web UI
+
+The service can also serve a single-owner React web UI for triaging ingested
+videos. Build it once (`npm ci && npm run build` in `frontend/`, see
+[Development](development.md)); the service serves `frontend/dist`, or the
+directory in `BIRD_RECOGNITION_API_UI_DIR`, at `/` on the same origin as the
+API. Open `http://127.0.0.1:8000/`, enter `BIRD_RECOGNITION_API_KEY`, and the
+service sets an HttpOnly same-site session cookie; the key is never stored in
+the browser. A configured API key is required for the UI and for any
+unfiltered media.
+
+Configure these in ignored `.env` or the process environment:
+
+- `BIRD_RECOGNITION_API_MANIFEST`: the SQLite ingestion manifest that lists
+  videos (without it the Videos view explains how to configure it).
+- `BIRD_RECOGNITION_API_CACHE_DIR`: where contact sheets and playback copies
+  are cached, outside Git.
+- `BIRD_RECOGNITION_API_UI_DIR`: optional built bundle location.
+- `BIRD_RECOGNITION_FFMPEG`: optional ffmpeg path for browser-playable copies;
+  otherwise `ffmpeg` on `PATH` is used. Without it only H.264 MP4 sources can
+  be played.
+
+The UI offers a filtered video list (default: unreviewed no-animal videos),
+a review queue (confirm, correct, skip, undo; shortcuts C, E, S, Z, P, arrows),
+bulk confirmation of no-animal results after a sample check, per-crop species
+labels, a video player and crop text search. Privacy: crops are privacy
+screened, but contact sheets and the player show **unfiltered footage** and are
+marked as such; they are served only to an authenticated owner. Species
+confidence and search similarity are not probabilities. Review decisions
+and crop corrections are stored in the PostgreSQL database (migration `005`);
+the UI never deletes, moves or renames video files.
+
+See the [web UI quickstart](../specs/007-react-frontend/quickstart.md) and
+[UI contract](../specs/007-react-frontend/contracts/ui.md).
+
 Export or verify the committed API contract with:
 
 ```powershell

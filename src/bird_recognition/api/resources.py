@@ -22,8 +22,14 @@ class APIResources:
         model_loader: Callable[[Path, str], Any] | None = None,
         ask_executor: Callable[..., Any] | None = None,
         job_manager: Any = None,
+        review_store_factory: Callable[[str], Any] | None = None,
     ) -> None:
         self.settings = settings
+        self._review_store_factory = review_store_factory
+        self._review_store: Any = None
+        self._catalog: Any = None
+        self.playback: Any = None
+        self.sheets: Any = None
         self._store_factory = store_factory
         self._model_loader = model_loader
         self.ask_executor = ask_executor
@@ -43,6 +49,74 @@ class APIResources:
                 factory = self._store_factory or _default_store_factory
                 self._store = factory(self.settings.database_url)
             return self._store
+
+    def get_playback(self) -> Any:
+        """Return the playback service, or None when no cache is configured."""
+        from bird_recognition.review.playback import PlaybackService
+
+        if self.settings.cache_dir is None:
+            return None
+        catalog = self.get_catalog()
+        with self._lock:
+            if self.playback is None:
+                self.playback = PlaybackService(
+                    self.settings.cache_dir, self.settings.ffmpeg, catalog
+                )
+            return self.playback
+
+    def get_contact_sheets(self) -> Any:
+        """Return the contact sheet service, or None when no cache is configured."""
+        from bird_recognition.review.contact_sheet import ContactSheetService
+
+        if self.settings.cache_dir is None:
+            return None
+        with self._lock:
+            if self.sheets is None:
+                self.sheets = ContactSheetService(self.settings.cache_dir)
+            return self.sheets
+
+    def playback_status(self, video: Any) -> str:
+        """Report playback readiness without starting a conversion."""
+        if video.source_id is None:
+            return "unavailable"
+        try:
+            playback = self.get_playback()
+        except APIError:
+            return "unavailable"
+        if playback is None:
+            return "unavailable"
+        return playback.status(video, probe=False)[0]
+
+    def get_review_store(self) -> Any:
+        """Return the review persistence store, created on first use."""
+        if not self.settings.database_url and self._review_store_factory is None:
+            raise APIError(
+                503, "database_unavailable", "The database is not configured."
+            )
+        with self._lock:
+            if self._review_store is None:
+                factory = self._review_store_factory or _default_review_store_factory
+                self._review_store = factory(self.settings.database_url or "")
+            return self._review_store
+
+    def get_catalog(self) -> Any:
+        """Return the read-only video catalog over the ingestion manifest."""
+        from bird_recognition.review.catalog import CurrentSettings, VideoCatalog
+
+        if self.settings.manifest is None:
+            raise APIError(
+                503, "manifest_unavailable", "The video manifest is not configured."
+            )
+        with self._lock:
+            if self._catalog is None:
+                self._catalog = VideoCatalog(
+                    self.settings.manifest,
+                    current=CurrentSettings(
+                        self.settings.interval, self.settings.animal_threshold
+                    ),
+                    allowed_roots=self.settings.allowed_roots,
+                )
+            return self._catalog
 
     def get_model(self, input_view: str) -> Any:
         """Load and cache the configured local embedding model for an input view."""
@@ -70,6 +144,12 @@ def _default_store_factory(database_url: str) -> Any:
     from bird_recognition.embed.storage import PgVectorStore
 
     return PgVectorStore(database_url)
+
+
+def _default_review_store_factory(database_url: str) -> Any:
+    from bird_recognition.review.store import PgReviewStore
+
+    return PgReviewStore(database_url)
 
 
 def _default_model_loader(model_dir: Path, input_view: str) -> Any:

@@ -91,4 +91,25 @@ def search(
             if status == 503
             else "The search request is not compatible with the selected run.",
         ) from None
-    return _search_payload(outcome)
+    return _with_video_links(request, _search_payload(outcome))
+
+
+def _with_video_links(
+    request: Request, payload: dict[str, object]
+) -> dict[str, object]:
+    """Add optional source_id and elapsed_seconds when the manifest knows the crop."""
+    results = payload.get("results")
+    resources = request.app.state.resources
+    if not isinstance(results, list) or resources.settings.manifest is None:
+        return payload
+    try:
+        locations = resources.get_catalog().crop_locations(
+            [str(item.get("crop_id")) for item in results]
+        )
+    except Exception:
+        return payload
+    for item in results:
+        found = locations.get(str(item.get("crop_id")))
+        if found is not None:
+            item["source_id"], item["elapsed_seconds"] = found
+    return payload

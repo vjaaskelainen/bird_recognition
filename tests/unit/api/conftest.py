@@ -46,3 +46,41 @@ class FakeStore:
 @pytest.fixture
 def fake_store() -> FakeStore:
     return FakeStore()
+
+
+@pytest.fixture
+def review_env(tmp_path):
+    """An app with a populated manifest and in-memory review store."""
+    from fastapi.testclient import TestClient
+
+    from bird_recognition.api.app import create_app
+    from bird_recognition.api.settings import APISettings
+    from bird_recognition.review.store import InMemoryReviewStore
+    from tests.unit.review.manifest_builder import ManifestBuilder
+
+    builder = ManifestBuilder(tmp_path / "out", tmp_path / "videos")
+    builder.run("r1", "2026-01-01T00:00:00")
+    builder.video("a", "a.mp4", run_id="r1", crops=1, capture="2026-01-02T00:00:00")
+    builder.frame("a", "r1", 0, 0.0, box=(0.1, 0.1, 0.5, 0.5), crop_id="c1")
+    (tmp_path / "out" / "crops").mkdir()
+    (tmp_path / "out" / "crops" / "c1.jpg").write_bytes(b"jpeg")
+    builder.video("b", "b.mp4", run_id="r1", crops=0, capture="2026-01-03T00:00:00")
+    builder.frame("b", "r1", 0, 0.0)
+    builder.video("c", "c.mp4", run_id="r1", crops=0, capture="2026-01-01T00:00:00")
+    builder.video("d", "d.mp4", run_id="r1", status="failed", failure="bad")
+    settings = APISettings(
+        api_key="secret",
+        database_url="postgresql://local",
+        manifest=builder.path,
+        allowed_roots=(tmp_path,),
+        cache_dir=tmp_path / "cache",
+    )
+    store = InMemoryReviewStore()
+    app = create_app(
+        settings,
+        store_factory=lambda _: None,
+        review_store_factory=lambda _: store,
+    )
+    client = TestClient(app, headers={"X-API-Key": "secret"})
+    yield client, store, builder
+    builder.close()

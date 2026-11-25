@@ -32,6 +32,8 @@ flowchart LR
     Manifest --> Embed
     Embed --> VectorDB[(PostgreSQL and pgvector)]
     VectorDB --> API[Optional local HTTP API]
+    API --> WebUI[Owner review web UI]
+    Manifest --> API
     VectorDB --> Inspect[Inspect persisted runs]
     VectorDB --> Search[Text search with local BioCLIP]
     VectorDB --> Evaluate[Evaluate and compare reviewed labels]
@@ -46,6 +48,8 @@ ingestion manifest or crops. PostgreSQL/pgvector stores embedding runs and
 species decisions for inspection, text search, and derived reports. Reference-assisted
 classification is opt-in; visits use explicit owner-reviewed groups and never
 replace per-crop decisions. Model benchmarking performs capped local inference.
+The optional [owner review web UI](docs/usage.md#owner-review-web-ui) is served by
+the local API and shows unfiltered footage to an authenticated owner only.
 
 ## Video ingestion
 
