@@ -12,9 +12,9 @@ animal at all. The project has two goals:
 
 Implemented today: video ingestion that detects animals and retains crops with
 provenance, optional species-tag suggestions for crops, text search over indexed
-crops, and a diagnostic full-frame extractor. Possible future extras include
-grounded question answering over the footage (Ask/RAG); there is no
-implemented answer-generation command.
+crops, grounded question answering, and an optional local HTTP service. A
+diagnostic full-frame extractor is available separately and does not apply
+privacy filtering.
 
 Species tags are candidate-relative suggestions, not verified biological
 identifications. See [Usage](docs/usage.md) for operational guidance and
@@ -31,6 +31,7 @@ flowchart LR
     Crops --> Embed[Optional BioCLIP embedding and species tagging]
     Manifest --> Embed
     Embed --> VectorDB[(PostgreSQL and pgvector)]
+    VectorDB --> API[Optional local HTTP API]
     VectorDB --> Inspect[Inspect persisted runs]
     VectorDB --> Search[Text search with local BioCLIP]
     VectorDB --> Evaluate[Evaluate and compare reviewed labels]
@@ -80,7 +81,7 @@ provisioning, feature validation, and measured evaluation evidence.
 ## Documentation
 
 - [Usage and local workflows](docs/usage.md): ingestion, frame extraction,
-  database, indexing, inspection, search, and classification-quality workflows.
+  database, indexing, inspection, search, Ask, and HTTP service workflows.
 - [Developer setup and checks](docs/development.md): environment, tests, lint,
   formatting, CI, and AI-assisted development.
 - [Ingestion feature documents](specs/001-ingest-videos/): requirements, design,
@@ -93,3 +94,5 @@ provisioning, feature validation, and measured evaluation evidence.
   crop/input preparation, shared labels, comparisons, references, benchmarks,
   and explicit visit aggregation. Implemented interfaces do not imply measured
   biological quality.
+- [HTTP service feature documents](specs/006-fastapi-service/): API contract,
+  OpenAPI description, and service validation quickstart.

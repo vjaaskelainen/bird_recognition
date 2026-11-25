@@ -369,6 +369,54 @@ or visit frequency, and near-duplicate frames are not independent sightings.
 See the [Ask CLI contract](../specs/005-ask-footage-questions/contracts/cli.md)
 and [acceptance quickstart](../specs/005-ask-footage-questions/quickstart.md).
 
+## HTTP service
+
+The optional `bird-recognition-api` service exposes local search, crop/run/visit
+reads, explicitly opted-in Ask requests, and managed ingest/index jobs. It is
+additive to the CLI and binds to `127.0.0.1:8000` by default:
+
+```powershell
+.\.venv\Scripts\uv.exe run bird-recognition-api serve
+curl http://127.0.0.1:8000/v1/health
+```
+
+Set `BIRD_RECOGNITION_API_HOST`, `BIRD_RECOGNITION_API_PORT`,
+`BIRD_RECOGNITION_API_KEY`, `BIRD_RECOGNITION_API_JOBS_DIR`, and
+`BIRD_RECOGNITION_API_ALLOWED_ROOTS` in ignored `.env` or the process
+environment. An API key is required for any non-loopback bind; when a key is
+configured, send it as `X-API-Key` on every endpoint except health. Keep the key
+private. Search uses the local database and BioCLIP model configured for the
+CLI. Ask also requires `allow_external_transmission: true` in its request and
+the private `BIRD_RECOGNITION_ASK_API_KEY`; without explicit consent it does
+not retrieve evidence or call the external service.
+
+The versioned base path is `/v1`. Lists use `limit` (default 20, maximum 100)
+and `offset`. Crop images are served only from the indexed run's recorded crop
+root, with JPEG/PNG extension validation; there is no frame endpoint. Visits
+require an explicitly owner-reviewed groups manifest supplied as the `groups`
+query parameter. Species confidence and search similarity are not biological
+probabilities, and visits are not inferred from shared video membership.
+
+Jobs require a configured job-record directory outside Git and one or more
+allowed filesystem roots. Ingest/index inputs and outputs must remain under
+those roots; only one job may be active at a time. Job files contain sanitized
+status and report summaries, not full command output or absolute request paths.
+All API failures use `application/problem+json` with a stable error code.
+Inspection/search results otherwise match the CLI payloads and may include local
+provenance paths; keep the service on loopback or protect LAN access with the
+shared API key.
+
+Export or verify the committed API contract with:
+
+```powershell
+.\.venv\Scripts\uv.exe run bird-recognition-api export-openapi
+.\.venv\Scripts\uv.exe run bird-recognition-api export-openapi --check
+```
+
+See the [HTTP service quickstart](../specs/006-fastapi-service/quickstart.md)
+and [API contract](../specs/006-fastapi-service/contracts/api.md) for request
+shapes, validation, and offline test guidance.
+
 ### Optional text-search quality evaluation
 
 Do not claim retrieval quality from controlled tests or unreviewed output. Before

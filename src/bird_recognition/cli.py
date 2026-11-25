@@ -6,7 +6,6 @@ import argparse
 import json
 import math
 import os
-import subprocess
 import sys
 from contextlib import closing
 from dataclasses import replace
@@ -28,152 +27,31 @@ from bird_recognition.ingest.models import (
 )
 from bird_recognition.ingest.pipeline import run_batch
 from bird_recognition.ingest.video import discover_videos, iter_video_frames
+from bird_recognition.inspection import (
+    add_case_ids,
+    build_inspection_payload,
+)
+from bird_recognition.paths import (
+    canonicalize_input,
+    canonicalize_output,
+    validate_destination,
+)
+from bird_recognition.payloads import (
+    _ask_payload,
+    _preflight_code,
+    _sanitize_ask_error,
+    _search_failure_code,
+    _search_payload,
+    ask_transmission_notice,
+)
 
 _DEFAULT_EXTENSIONS = ".mp4,.mov,.m4v,.mkv,.avi,.mpeg,.mpg"
-
-
-def canonicalize_input(path: str | Path) -> Path:
-    """Return an existing input directory's canonical path."""
-    candidate = Path(path).expanduser()
-    try:
-        resolved = candidate.resolve(strict=True)
-    except OSError as error:
-        raise ValidationError(f"input path cannot be resolved: {candidate}") from error
-    if not resolved.is_dir():
-        raise ValidationError(f"input path is not a directory: {resolved}")
-    return resolved
-
-
-def canonicalize_output(path: str | Path) -> Path:
-    """Return a canonical output path without creating it."""
-    candidate = Path(path).expanduser()
-    try:
-        resolved = candidate.resolve(strict=False)
-    except OSError as error:
-        raise ValidationError(f"output path cannot be resolved: {candidate}") from error
-    if resolved.exists() and not resolved.is_dir():
-        raise ValidationError(f"output path is not a directory: {resolved}")
-    return resolved
-
-
-def _overlaps(first: Path, second: Path) -> bool:
-    return first == second or first in second.parents or second in first.parents
-
-
-def _add_case_ids(items: list[dict[str, object]]) -> list[dict[str, object]]:
-    from bird_recognition.ingest.manifest import stable_case_id
-
-    for item in items:
-        provenance = item.get("provenance")
-        if not isinstance(provenance, dict):
-            continue
-        digest = provenance.get("source_content_sha256")
-        frame_number = provenance.get("frame_number")
-        detection_id = provenance.get("detection_id")
-        box = provenance.get("detection_box_normalized")
-        if (
-            not isinstance(digest, str)
-            or type(frame_number) is not int
-            or not isinstance(detection_id, str)
-            or not isinstance(box, (list, tuple))
-            or len(box) != 4
-        ):
-            continue
-        case_id = stable_case_id(
-            digest,
-            frame_number,
-            detection_id,
-            tuple(float(coordinate) for coordinate in box),
-        )
-        provenance["case_id"] = case_id
-        item["case_id"] = case_id
-    return items
-
-
-def _candidate_records(run_data: dict[str, object]) -> list[dict[str, object]]:
-    values = run_data.get("candidates")
-    if isinstance(values, dict):
-        values = values.get("candidates", values.get("species"))
-    if not isinstance(values, list):
-        return []
-    return [value for value in values if isinstance(value, dict)]
-
-
-def _add_candidate_details(
-    run_data: dict[str, object], items: list[dict[str, object]]
-) -> None:
-    records = {record.get("id"): record for record in _candidate_records(run_data)}
-    for item in items:
-        decision = item.get("decision")
-        if not isinstance(decision, dict):
-            continue
-        assigned_id = decision.get("assigned_species_id")
-        candidate = records.get(assigned_id)
-        if candidate is not None:
-            kind = candidate.get("kind", "species")
-            decision["assigned_candidate_kind"] = kind
-            decision["assigned_category"] = candidate.get("category")
-            decision["assigned_candidate"] = candidate
-        scores = decision.get("candidate_scores")
-        if isinstance(scores, list):
-            for score in scores:
-                if isinstance(score, dict) and (record := records.get(score.get("id"))):
-                    score["kind"] = record.get("kind", "species")
-                    score["category"] = record.get("category")
-
-
-def _git_root(path: Path) -> Path | None:
-    candidate = path
-    while not candidate.exists() and candidate != candidate.parent:
-        candidate = candidate.parent
-    result = subprocess.run(
-        ["git", "-C", str(candidate), "rev-parse", "--show-toplevel"],
-        capture_output=True,
-        check=False,
-        text=True,
-    )
-    if result.returncode:
-        return None
-    return Path(result.stdout.strip()).resolve()
 
 
 def _environment_defaults() -> dict[str, str | None]:
     dotenv_path = find_dotenv(usecwd=True)
     dotenv_defaults = dotenv_values(dotenv_path) if dotenv_path else {}
     return {**dotenv_defaults, **os.environ}
-
-
-def validate_destination(input_root: Path, output_root: Path) -> None:
-    """Reject overlapping input/output trees and version-controlled destinations."""
-    if _overlaps(input_root, output_root):
-        raise ValidationError("input and output directories must be disjoint")
-    project_root = _git_root(Path(__file__).resolve())
-    working_root = _git_root(Path.cwd())
-    destination_root = _git_root(output_root)
-    roots = {
-        root
-        for root in (project_root, working_root, destination_root)
-        if root is not None
-    }
-    for root in roots:
-        if _overlaps(root, input_root):
-            raise ValidationError("input footage must be outside the Git repository")
-        if _overlaps(root, output_root):
-            raise ValidationError("output directory must be outside the Git repository")
-        result = subprocess.run(
-            ["git", "-C", str(root), "ls-files", "-z"],
-            capture_output=True,
-            check=False,
-        )
-        if result.returncode:
-            raise ValidationError("cannot verify whether output is Git-tracked")
-        for raw_path in result.stdout.split(b"\0"):
-            if raw_path:
-                tracked_path = (root / Path(raw_path.decode("utf-8"))).resolve()
-                if _overlaps(tracked_path, output_root):
-                    raise ValidationError(
-                        "output directory overlaps Git-tracked content"
-                    )
 
 
 def extract_frame(
@@ -771,7 +649,7 @@ def _dispatch_embed_command(arguments: argparse.Namespace) -> int:
                 except StorageError as error:
                     raise PreflightError(str(error)) from None
                 run_data, items = store.inspect_run(run_id)
-                _add_case_ids(items)
+                add_case_ids(items)
                 report = build_evaluation_report(
                     run_data,
                     items,
@@ -805,7 +683,7 @@ def _dispatch_embed_command(arguments: argparse.Namespace) -> int:
                 run_entries = []
                 for run_id in run_ids:
                     run_data, items = store.inspect_run(run_id)
-                    run_entries.append((run_data, _add_case_ids(items)))
+                    run_entries.append((run_data, add_case_ids(items)))
                 report = build_comparison_report(
                     run_entries,
                     arguments.labels,
@@ -862,7 +740,7 @@ def _dispatch_embed_command(arguments: argparse.Namespace) -> int:
                 model = load_bioclip(arguments.model_dir, input_view=input_view)
                 report = build_benchmark_report(
                     run_data,
-                    _add_case_ids(items),
+                    add_case_ids(items),
                     arguments.labels,
                     model=model,
                     max_crops=arguments.max_crops,
@@ -894,7 +772,7 @@ def _dispatch_embed_command(arguments: argparse.Namespace) -> int:
                 except StorageError as error:
                     raise PreflightError(str(error)) from None
                 run_data, items = store.inspect_run(run_id)
-                _add_case_ids(items)
+                add_case_ids(items)
                 report = build_visit_report(
                     run_data,
                     items,
@@ -921,19 +799,7 @@ def _dispatch_embed_command(arguments: argparse.Namespace) -> int:
                 run_data, items = store.inspect_run(
                     UUID(arguments.run_id), arguments.crop_id
                 )
-                _add_case_ids(items)
-                species_data = run_data.get("candidates", {})
-                species = (
-                    species_data.get("candidates", species_data.get("species", []))
-                    if isinstance(species_data, dict)
-                    else []
-                )
-                _add_candidate_details(run_data, items)
-                warnings = [RELATIVE_CONFIDENCE_WARNING]
-                if len(species) == 1:
-                    warnings.append(SINGLE_CANDIDATE_WARNING)
-                run_data["warnings"] = warnings
-                payload = {"schema_version": 1, "run": run_data, "items": items}
+                payload = build_inspection_payload(run_data, items)
             store.close()
             run = None
         else:
@@ -1188,248 +1054,9 @@ def _dispatch_embed_command(arguments: argparse.Namespace) -> int:
         return 1
 
 
-def _sanitize_ask_error(message: str, api_key: str | None) -> str:
-    from bird_recognition.embed.config import sanitize_error
-
-    sanitized = sanitize_error(message)
-    if api_key:
-        sanitized = sanitized.replace(api_key, "[credential redacted]")
-    return sanitized
-
-
 def _render_ask_transmission_notice(evidence: tuple[object, ...]) -> None:
     """Disclose the exact selected images and metadata before service invocation."""
-    items = ", ".join(
-        (
-            f"{item.crop_id} ("
-            f"{'image and selected metadata' if item.image_bytes else 'metadata only'})"
-        )
-        for item in evidence
-    )
-    print(
-        "Transmission notice: the question and selected evidence will be sent to "
-        "the configured external "
-        f"answer service: {items}. Full source videos and unselected crops "
-        "are not sent.",
-        file=sys.stderr,
-    )
-
-
-def _preflight_code(error: Exception) -> str:
-    message = str(error).casefold()
-    if "writer_busy" in message or "writer busy" in message:
-        return "writer_busy"
-    if "vector" in message:
-        return "vector_unavailable"
-    if "schema" in message:
-        return "schema_mismatch"
-    if "database" in message or "postgres" in message:
-        return "database_unavailable"
-    if "threshold" in message:
-        return "invalid_threshold"
-    if "model" in message or "bioclip" in message:
-        return "invalid_model"
-    if "species" in message or "candidate" in message:
-        return "invalid_species"
-    if "manifest" in message:
-        return "invalid_manifest"
-    return "invalid_selection"
-
-
-def _search_failure_code(error: Exception) -> str:
-    message = str(error).casefold()
-    if "query must" in message or "search query" in message:
-        return "invalid_query"
-    if "limit" in message:
-        return "invalid_limit"
-    if "date" in message:
-        return "invalid_date"
-    if "lighting" in message:
-        return "invalid_lighting"
-    if "query embedding" in message:
-        return "query_embedding_failed"
-    if "model fingerprint" in message:
-        return "model_mismatch"
-    if "representation" in message:
-        return "incompatible_representation"
-    if "vector" in message or "similarity" in message:
-        return "invalid_numeric_result"
-    if "schema" in message:
-        return "schema_mismatch"
-    if "database" in message or "postgres" in message:
-        return "database_unavailable"
-    if "model" in message or "bioclip" in message:
-        return "model_unavailable"
-    if "species" in message or "candidate" in message:
-        return "invalid_species"
-    if "run" in message or "context" in message:
-        return "invalid_selection"
-    return "invalid_search"
-
-
-def _search_payload(outcome: object) -> dict[str, object]:
-    request = outcome.request
-    context = outcome.context
-    return {
-        "schema_version": 1,
-        "status": "searched",
-        "query": request.query,
-        "filters": {
-            "start_date": (
-                request.start_date.isoformat()
-                if request.start_date is not None
-                else None
-            ),
-            "end_date": (
-                request.end_date.isoformat() if request.end_date is not None else None
-            ),
-            "lighting": request.lighting.value
-            if request.lighting is not None
-            else None,
-            "species_id": request.species_id,
-        },
-        "requested_limit": request.limit,
-        "returned_count": outcome.returned_count,
-        "context": {
-            "run_id": str(context.run_id),
-            "model_fingerprint": context.model_fingerprint,
-            "config_fingerprint": context.config_fingerprint,
-            "candidate_set_fingerprint": context.candidate_set_fingerprint,
-        },
-        "score": {
-            "name": "cosine_similarity",
-            "range": [-1, 1],
-            "higher_is_more_similar": True,
-            "interpretation": "relative retrieval relevance; not a probability",
-        },
-        "warnings": list(outcome.warnings),
-        "results": [
-            {
-                "rank": result.rank,
-                "similarity": result.similarity,
-                "crop_id": result.crop_id,
-                "snapshot_id": result.snapshot_id,
-                "representation_id": str(result.representation_id),
-                "decision_id": str(result.decision_id),
-                "crop_path": str(result.crop_path),
-                "image_status": result.image_status,
-                "capture": {
-                    "time": result.capture_time,
-                    "timezone": result.capture_timezone,
-                },
-                "lighting": result.lighting.value,
-                "detection": {
-                    "id": result.detection_id,
-                    "category": result.detection_category,
-                    "confidence": result.detection_confidence,
-                    "box_normalized": list(result.detection_box_normalized),
-                    "crop_box_pixels": list(result.crop_box_pixels),
-                    "frame_width": result.frame_width,
-                    "frame_height": result.frame_height,
-                },
-                "species": {
-                    "assigned_species_id": result.assigned_species_id or "unknown",
-                    "confidence": result.species_confidence,
-                    "config_fingerprint": result.config_fingerprint,
-                },
-                "source": {
-                    "source_id": result.source_id,
-                    "video": result.source_video,
-                    "original_path": result.source_original_path,
-                    "frame_number": result.frame_number,
-                    "elapsed_seconds": result.elapsed_seconds,
-                },
-            }
-            for result in outcome.results
-        ],
-    }
-
-
-def _ask_payload(outcome: object) -> dict[str, object]:
-    request = outcome.request
-    context = outcome.context
-    payload: dict[str, object] = {
-        "schema_version": 1,
-        "status": (
-            "answered"
-            if outcome.status.value == "supported"
-            else "insufficient_evidence"
-        ),
-        "question": request.question,
-        "filters": {
-            "start_date": (
-                request.start_date.isoformat()
-                if request.start_date is not None
-                else None
-            ),
-            "end_date": (
-                request.end_date.isoformat() if request.end_date is not None else None
-            ),
-            "lighting": (
-                request.lighting.value if request.lighting is not None else None
-            ),
-            "species_id": request.species_id,
-        },
-        "requested_limit": request.evidence_limit,
-        "evidence_count": len(outcome.evidence),
-        "context": {
-            "run_id": str(request.run_id),
-            "model_fingerprint": (
-                context.model_fingerprint if context is not None else None
-            ),
-            "config_fingerprint": (
-                context.config_fingerprint if context is not None else None
-            ),
-            "candidate_set_fingerprint": (
-                context.candidate_set_fingerprint if context is not None else None
-            ),
-        },
-        "claims": [
-            {
-                "text": claim.text,
-                "citations": [
-                    {
-                        "evidence_index": citation.evidence_index,
-                        "crop_id": citation.crop_id,
-                        "source_video": citation.source_video,
-                        "frame_number": citation.frame_number,
-                        "capture_time": citation.capture_time,
-                    }
-                    for citation in claim.citations
-                ],
-            }
-            for claim in outcome.claims
-        ],
-        "evidence": [
-            {
-                "evidence_index": item.evidence_index,
-                "crop_id": item.crop_id,
-                "source_id": item.source_id,
-                "support": (
-                    "retrieved_not_supporting"
-                    if outcome.status.value == "insufficient_evidence"
-                    else "selected"
-                ),
-                "image_status": item.image_status,
-                "source_video": item.source_video,
-                "frame_number": item.frame_number,
-                "elapsed_seconds": item.elapsed_seconds,
-                "capture_time": item.capture_time,
-                "capture_timezone": item.capture_timezone,
-                "lighting": item.lighting.value,
-                "similarity": item.similarity,
-                "species": {
-                    "id": item.species_id or "unknown",
-                    "confidence": item.species_confidence,
-                },
-                "detection_confidence": item.detection_confidence,
-            }
-            for item in outcome.evidence
-        ],
-    }
-    if outcome.reason is not None:
-        payload["reason"] = outcome.reason
-    return payload
+    print(ask_transmission_notice(evidence), file=sys.stderr)
 
 
 def _render_ask_outcome(outcome: object, *, json_output: bool) -> None:

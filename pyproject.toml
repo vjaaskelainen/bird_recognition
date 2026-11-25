@@ -29,6 +29,7 @@ dependencies = [
 
 [project.scripts]
 bird-recognition = "bird_recognition.cli:main"
+bird-recognition-api = "bird_recognition.api.server:main"
 
 [dependency-groups]
 dev = [

@@ -16,7 +16,7 @@ non-loopback binding); `GET /v1/health` is exempt.
 | `GET /v1/crops/{crop_id}/image` | privacy-screened crop image | 200 `image/jpeg\|png` / 404 | — |
 | `GET /v1/runs` | list runs (paginated) | 200 page | `inspect` |
 | `GET /v1/runs/{run_id}` | run detail/report | 200 / 404 | `inspect --json` |
-| `GET /v1/visits?run_id=` | visit aggregation from reviewed groups | 200 | `aggregate-visits --json` |
+| `GET /v1/visits?run_id=&groups=` | visit aggregation from reviewed groups manifest | 200 | `aggregate-visits --json` |
 | `POST /v1/ask` | grounded answer (opt-in) | 200 `AskResponse` / 403 `opt_in_required` | `ask --json` |
 | `POST /v1/ingest` | start ingestion job | 202 `{job_id, status}` | `ingest` |
 | `POST /v1/index` | start indexing job | 202 `{job_id, status}` | `index` |
@@ -35,6 +35,8 @@ non-loopback binding); `GET /v1/health` is exempt.
 - Lists: `limit` default 20, max 100; envelope `{items, limit, offset, total}`.
 - Every error is problem+json with a stable `code`; no database URLs, keys or filesystem
   paths in `detail`.
+- Visit requests require a reviewed group manifest path in `groups`; the manifest is
+  validated by the same loader used by `aggregate-visits`.
 - Operation descriptions state: species confidence and search similarity are not
   biological probabilities; visits require owner-reviewed groups.
 

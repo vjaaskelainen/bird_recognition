@@ -78,6 +78,19 @@ feature-specific fixture expectations, integration prerequisites, and acceptance
 evidence. The [classification quickstart](../specs/004-improve-species-classification/quickstart.md)
 covers shared-label review, comparisons, references, and visit/benchmark checks.
 
+The HTTP service tests use FastAPI's test client and fake stores/models; they do
+not require PostgreSQL, model assets, external services, or an API key. Verify
+the generated OpenAPI contract and run the focused service tests with:
+
+```powershell
+.\.venv\Scripts\python.exe -m pytest tests\unit\api
+.\.venv\Scripts\uv.exe run bird-recognition-api export-openapi --check
+```
+
+After changing an API route or schema, regenerate
+`docs/api/openapi.json` with `bird-recognition-api export-openapi` and ensure
+the check passes. The full unit suite includes the OpenAPI validator.
+
 ## Lint, format, and pre-commit
 
 Run Ruff and the configured pre-commit hooks through the project environment:
@@ -108,6 +121,5 @@ For feature work, the workflow is specify → plan → tasks → implement → c
 review each artifact before moving to the next step. The agent-instructions
 template source and configuration are recorded in
 [`.copier-answers.agent-instructions.yml`](../.copier-answers.agent-instructions.yml).
-
 
 

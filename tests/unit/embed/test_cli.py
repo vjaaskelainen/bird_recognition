@@ -10,13 +10,14 @@ from uuid import UUID, uuid4
 
 import pytest
 
-from bird_recognition.cli import _add_candidate_details, _build_parser, main
+from bird_recognition.cli import _build_parser, main
 from bird_recognition.embed.models import (
     Lighting,
     RunStatus,
     SearchContext,
     SearchResult,
 )
+from bird_recognition.inspection import add_candidate_details
 
 
 def _write_shared_labels(path: Path, case_id: str = "case-1") -> Path:
@@ -81,7 +82,7 @@ def test_inspection_candidate_details_mark_category_assignments_as_coarse() -> N
         }
     ]
 
-    _add_candidate_details(run_data, items)
+    add_candidate_details(run_data, items)
 
     decision = items[0]["decision"]
     assert isinstance(decision, dict)
