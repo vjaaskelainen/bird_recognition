@@ -11,8 +11,13 @@ generation auditable and useful even when retrieval is incomplete.
 ### II. Privacy-Preserving Data Handling
 Raw videos, extracted frames, and crops MUST remain outside version control. Ingestion MUST
 exclude detected people, and published sample data MUST be checked to contain no people.
-LLM credentials MUST be supplied through environment variables, never committed. These
-requirements protect people captured incidentally and prevent accidental disclosure.
+LLM credentials MUST be supplied through environment variables, never committed. The one
+permitted exception to screening is owner-only review media (unfiltered source playback and
+frame contact sheets) in the local web UI: it MUST sit behind authentication, be limited to
+the configured allowed roots, be clearly marked as unfiltered, and MUST NOT be used for
+search, Ask, or any export. Derived media caches MUST live outside the repository and the
+source folders. These requirements protect people captured incidentally and prevent
+accidental disclosure.
 
 ### III. Pretrained Models and Measured Quality
 The project MUST use pretrained models and MUST NOT train or fine-tune models as part of
@@ -29,12 +34,16 @@ database integration MUST include tests at the affected boundary.
 
 ### V. Small, Usable CLI-First Scope
 The CLI is the primary interface. Implementation MUST prioritize a complete local workflow
-from ingestion through search, grounded Q&A, and evaluation before optional UI work. The
+from ingestion through search, grounded Q&A, and evaluation before optional UI work; the
+web UI MUST NOT remove or replace any CLI capability. The
 project MUST avoid authentication, multi-user support, cloud deployment, real-time
-streaming, and agent features unless the constitution is amended. The one permitted
-exception is an optional local HTTP service that is additive to the CLI, binds to
+streaming, and agent features unless the constitution is amended. The permitted
+exceptions are (1) an optional local HTTP service that is additive to the CLI, binds to
 loopback by default, and, only for non-loopback exposure, requires a single shared API
-key; it MUST NOT add accounts, roles, or multi-user support. Prefer the smallest
+key; and (2) an optional single-owner web UI served by that service, which MAY exchange
+the shared API key once for a same-origin session so media elements can load protected
+resources. The UI MUST NOT act on source files (no delete, move, or rename), and neither
+exception may add accounts, roles, or multi-user support. Prefer the smallest
 implementation that demonstrates the project goals.
 
 ## Technical and Data Constraints
@@ -74,4 +83,4 @@ version. Compliance is reviewed during feature planning, implementation, and fin
 checks. Detailed coding conventions and agent workflow remain in `AGENTS.md` and linked
 guidance rather than being duplicated here.
 
-**Version**: 1.1.0 | **Ratified**: 2026-10-11 | **Last Amended**: 2026-11-24
+**Version**: 1.2.0 | **Ratified**: 2026-10-11 | **Last Amended**: 2026-11-25
