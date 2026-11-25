@@ -28,6 +28,11 @@ Always run commands from the repository root, using these exact forms in PowerSh
 
 Pytest defaults to `tests/unit`; smoke tests require local assets, and integration
 tests require `BIRD_RECOGNITION_TEST_DATABASE_URL` for a disposable local database.
+Use [`compose.integration.yaml`](compose.integration.yaml) for that database
+(`podman compose -f compose.integration.yaml up -d --wait`); its data is test-generated
+and its container/volume may be freely removed or recreated (`down -v`). Never use
+`down -v` with `compose.yaml`, which holds the persistent application database. See
+[development](docs/development.md) for the URL.
 
 Rules:
 - Never run bare `pytest`, `python`, `pip`, `uv` or any other tool name. They are not

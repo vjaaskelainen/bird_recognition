@@ -62,7 +62,11 @@ refer to locally available files. The separate BioCLIP smoke test requires
 quality. See [`.env.example`](../.env.example) for the full variable inventory.
 Integration tests require
 `BIRD_RECOGNITION_TEST_DATABASE_URL` to point to an approved disposable local
-database. Smoke and integration tests are opt-in and are not part of the default
+database. [`compose.integration.yaml`](../compose.integration.yaml) provides one
+(`podman compose -f compose.integration.yaml up -d --wait`, URL
+`postgresql://bird_recognition_test:bird_recognition_test@localhost:5433/bird_recognition_test`);
+it is separate from the persistent application database in `compose.yaml`, and its
+container and volume may be freely removed with `down -v`. Smoke and integration tests are opt-in and are not part of the default
 unit-test discovery.
 
 Run one test file or a single test by appending the corresponding path/node ID:
